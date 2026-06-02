@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>배틀플레이스 (Battle Place)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Teko:wght@500;600;700&family=Oswald:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0b0e0c; --panel:rgba(18,22,18,.88); --line:#3a4034;
+    --acc:#f2a900; --acc2:#ffce5c; --red:#e7402e; --green:#7cc043;
+    --txt:#eef0e8; --dim:#9aa08c;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);
+    font-family:'Oswald',sans-serif;color:var(--txt);user-select:none;}
+  canvas{display:block;}
+  .hidden{display:none!important;}
+
+  /* ===== 로딩 ===== */
+  #loading{position:fixed;inset:0;z-index:80;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;background:#0b0e0c;}
+  .load-title{font-family:'Teko';font-size:64px;letter-spacing:3px;color:var(--acc);}
+  .load-bar-bg{margin-top:18px;width:min(360px,80vw);height:10px;background:#1c211a;
+    border:1px solid var(--line);border-radius:6px;overflow:hidden;}
+  .load-bar{height:100%;width:0%;background:linear-gradient(90deg,var(--acc),var(--acc2));
+    transition:width .25s;}
+  .load-txt{margin-top:12px;font-size:14px;color:var(--dim);letter-spacing:1px;}
+
+  /* ===== 시작 화면 ===== */
+  .overlay{position:fixed;inset:0;z-index:60;display:flex;align-items:center;
+    justify-content:center;flex-direction:column;
+    background:linear-gradient(160deg,#10140e 0%,#0b0e0c 60%),
+      repeating-linear-gradient(45deg,transparent,transparent 12px,rgba(242,169,0,.02) 12px,rgba(242,169,0,.02) 24px);}
+  .brand{font-family:'Teko';font-size:clamp(56px,12vw,120px);line-height:.82;
+    letter-spacing:4px;color:var(--txt);text-align:center;}
+  .brand span{color:var(--acc);}
+  .brand-sub{font-size:clamp(13px,2.4vw,18px);letter-spacing:10px;color:var(--dim);
+    margin-top:2px;text-transform:uppercase;}
+  .panel{margin-top:34px;background:var(--panel);border:1px solid var(--line);
+    border-radius:6px;padding:26px 30px;width:min(430px,90vw);backdrop-filter:blur(8px);
+    box-shadow:0 24px 70px rgba(0,0,0,.7);}
+  .field{margin-bottom:15px;}
+  .field label{display:block;font-size:12px;color:var(--dim);letter-spacing:2px;
+    text-transform:uppercase;margin-bottom:6px;}
+  .field input,.field select{width:100%;background:#0c100b;border:1px solid var(--line);
+    color:var(--txt);padding:11px;border-radius:4px;font-family:'Oswald';font-size:16px;outline:none;}
+  .field input:focus,.field select:focus{border-color:var(--acc);}
+  .btn{width:100%;padding:15px;border:none;border-radius:4px;cursor:pointer;
+    font-family:'Teko';font-size:26px;letter-spacing:3px;text-transform:uppercase;
+    background:linear-gradient(180deg,var(--acc),#cf8e00);color:#1a1200;
+    box-shadow:0 5px 0 #8f6200;transition:transform .08s,box-shadow .12s;}
+  .btn:active{transform:translateY(5px);box-shadow:0 0 0 #8f6200;}
+  .keys{margin-top:16px;font-size:13px;color:var(--dim);line-height:1.7;}
+  .keys b{color:var(--acc2);}
+
+  /* ===== HUD ===== */
+  #hud{position:fixed;inset:0;z-index:30;pointer-events:none;}
+  /* 십자선 (조준 시 좁아짐) */
+  #crosshair{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+    width:30px;height:30px;transition:.12s;}
+  #crosshair div{position:absolute;background:rgba(255,255,255,.9);}
+  #crosshair .ch-t,#crosshair .ch-b{left:50%;width:2px;height:8px;transform:translateX(-50%);}
+  #crosshair .ch-l,#crosshair .ch-r{top:50%;height:2px;width:8px;transform:translateY(-50%);}
+  #crosshair .ch-t{top:0;} #crosshair .ch-b{bottom:0;}
+  #crosshair .ch-l{left:0;} #crosshair .ch-r{right:0;}
+
+  /* 상단 생존바 (배그 스타일 길쭉한 바) */
+  #aliveTop{position:absolute;top:10px;left:50%;transform:translateX(-50%);
+    display:flex;align-items:center;gap:8px;background:rgba(11,14,12,.7);
+    border:1px solid var(--line);border-radius:3px;padding:5px 16px;}
+  #aliveTop .num{font-family:'Teko';font-size:26px;color:var(--acc);line-height:1;}
+  #aliveTop .lbl{font-size:11px;color:var(--dim);letter-spacing:2px;}
+
+  /* 미니맵 (우상단) */
+  #minimapWrap{position:absolute;top:54px;right:14px;width:150px;}
+  #minimap{width:150px;height:150px;border:2px solid var(--line);border-radius:4px;
+    background:rgba(11,14,12,.5);}
+  #phaseInfo{margin-top:4px;font-size:12px;color:var(--dim);text-align:center;letter-spacing:1px;}
+
+  /* 좌하단: 체력 + 자세 */
+  #botleft{position:absolute;left:16px;bottom:16px;width:min(320px,46vw);}
+  #hpRow{display:flex;align-items:center;gap:8px;}
+  .stance{font-family:'Teko';font-size:22px;color:var(--acc2);
+    border:1px solid var(--line);border-radius:3px;padding:0 8px;background:rgba(11,14,12,.6);}
+  #hpbarBg{flex:1;height:16px;background:#1c211a;border:1px solid var(--line);
+    border-radius:3px;overflow:hidden;}
+  #hpbar{height:100%;width:100%;background:linear-gradient(90deg,#e7402e,var(--green));transition:.18s;}
+  #hpNum{font-family:'Teko';font-size:24px;color:var(--txt);min-width:42px;text-align:right;}
+
+  /* 우하단: 무기 슬롯 (배그식 1,2번) */
+  #botright{position:absolute;right:16px;bottom:16px;text-align:right;}
+  .wslots{display:flex;gap:6px;justify-content:flex-end;margin-bottom:6px;}
+  .wslot{min-width:120px;padding:5px 10px;border:1px solid var(--line);border-radius:3px;
+    background:rgba(11,14,12,.6);text-align:left;opacity:.5;transition:.15s;}
+  .wslot.active{opacity:1;border-color:var(--acc);background:rgba(242,169,0,.12);}
+  .wslot .k{font-size:11px;color:var(--dim);}
+  .wslot .n{font-family:'Teko';font-size:20px;line-height:1;color:var(--txt);}
+  #ammoBig{font-family:'Teko';font-size:48px;line-height:.9;color:var(--txt);}
+  #ammoBig .mag{font-size:24px;color:var(--dim);}
+
+  /* 알림/줍기 */
+  #pickHint{position:absolute;bottom:130px;left:50%;transform:translateX(-50%);
+    background:rgba(11,14,12,.8);border:1px solid var(--acc);border-radius:3px;
+    padding:7px 16px;font-size:15px;letter-spacing:1px;opacity:0;transition:.2s;}
+  #pickHint.show{opacity:1;}
+  #pickHint b{color:var(--acc2);}
+
+  #zoneWarn{position:absolute;top:96px;left:50%;transform:translateX(-50%);
+    color:var(--red);font-size:16px;letter-spacing:2px;opacity:0;transition:.3s;
+    text-shadow:0 0 12px rgba(231,64,46,.7);}
+  #zoneWarn.show{opacity:1;}
+
+  #killfeed{position:absolute;top:54px;left:14px;font-size:14px;}
+  #killfeed div{margin-bottom:4px;background:rgba(11,14,12,.7);padding:3px 9px;
+    border-left:3px solid var(--acc);display:inline-block;}
+
+  #dmgflash{position:fixed;inset:0;z-index:35;background:rgba(231,64,46,0);
+    pointer-events:none;transition:.1s;}
+  #dmgVignette{position:fixed;inset:0;z-index:34;pointer-events:none;opacity:0;
+    box-shadow:inset 0 0 120px 40px rgba(231,64,46,.6);transition:.2s;}
+
+  /* ===== 모바일 터치 ===== */
+  #touch{position:fixed;inset:0;z-index:32;pointer-events:none;}
+  #joy{position:absolute;left:26px;bottom:26px;width:120px;height:120px;border-radius:50%;
+    background:rgba(255,255,255,.05);border:2px solid var(--line);pointer-events:auto;}
+  #joyStick{position:absolute;left:50%;top:50%;width:52px;height:52px;transform:translate(-50%,-50%);
+    border-radius:50%;background:rgba(242,169,0,.55);border:2px solid var(--acc);}
+  .tb{position:absolute;pointer-events:auto;border-radius:50%;background:rgba(11,14,12,.55);
+    border:2px solid var(--line);color:var(--txt);font-family:'Teko';font-size:18px;
+    display:flex;align-items:center;justify-content:center;}
+  #tFire{right:28px;bottom:36px;width:92px;height:92px;background:rgba(231,64,46,.22);border-color:var(--red);}
+  #tAim{right:130px;bottom:54px;width:60px;height:60px;}
+  #tJump{right:40px;bottom:140px;width:58px;height:58px;}
+  #tReload{right:128px;bottom:144px;width:58px;height:58px;}
+  #tPick{left:160px;bottom:40px;width:66px;height:66px;background:rgba(124,192,67,.2);border-color:var(--green);}
+  #tStance{left:160px;bottom:118px;width:58px;height:58px;}
+
+  /* ===== 결과 ===== */
+  #result{z-index:70;}
+  .res-title{font-family:'Teko';font-size:clamp(48px,11vw,110px);line-height:.9;text-align:center;}
+  .res-win{color:var(--acc);text-shadow:0 0 40px rgba(242,169,0,.6);}
+  .res-lose{color:var(--dim);}
+  .res-stat{margin-top:14px;font-size:22px;text-align:center;}
+  .res-stat span{color:var(--acc2);font-weight:700;}
+
+  @media(max-width:760px){
+    #minimapWrap{width:108px;} #minimap{width:108px;height:108px;}
+    #botleft{width:50vw;}
+  }
+</style>
+</head>
+<body>
+
+<!-- 로딩 -->
+<div id="loading">
+  <div class="load-title">BATTLE PLACE</div>
+  <div class="load-bar-bg"><div class="load-bar" id="loadBar"></div></div>
+  <div class="load-txt" id="loadTxt">모델 불러오는 중...</div>
+</div>
+
+<!-- 시작 -->
+<div id="start" class="overlay hidden">
+  <div class="brand">BATTLE<br><span>PLACE</span></div>
+  <div class="brand-sub">배 틀 플 레 이 스</div>
+  <div class="panel">
+    <div class="field">
+      <label>닉네임</label>
+      <input id="nick" type="text" maxlength="12" placeholder="플레이어 이름">
+    </div>
+    <div class="field">
+      <label>매치 인원</label>
+      <select id="botCount">
+        <option value="9">10인 (빠름)</option>
+        <option value="19" selected>20인 (보통)</option>
+        <option value="49">50인 (치열)</option>
+        <option value="99">100인 (대규모)</option>
+      </select>
+    </div>
+    <button class="btn" id="startBtn">매치 시작</button>
+    <div class="keys">
+      <b>이동</b> WASD · <b>달리기</b> Shift · <b>점프</b> Space<br>
+      <b>조준</b> 우클릭 · <b>사격</b> 좌클릭 · <b>재장전</b> R<br>
+      <b>웅크리기</b> C · <b>엎드리기</b> Z · <b>줍기</b> F<br>
+      <b>무기</b> 1·2 · <b>차량</b> 탑승 F · <b>시점전환</b> V
+    </div>
+  </div>
+</div>
+
+<!-- HUD -->
+<div id="hud" class="hidden">
+  <div id="crosshair"><div class="ch-t"></div><div class="ch-b"></div><div class="ch-l"></div><div class="ch-r"></div></div>
+  <div id="aliveTop"><span class="num" id="aliveNum">20</span><span class="lbl">생존</span></div>
+  <div id="minimapWrap">
+    <canvas id="minimap" width="150" height="150"></canvas>
+    <div id="phaseInfo">자기장 --</div>
+  </div>
+  <div id="killfeed"></div>
+  <div id="zoneWarn">⚠ 자기장 밖! 안으로 이동</div>
+  <div id="pickHint"><b>F</b> <span id="pickName">무기</span> 줍기</div>
+
+  <div id="botleft">
+    <div id="hpRow">
+      <span class="stance" id="stanceLbl">서기</span>
+      <div id="hpbarBg"><div id="hpbar"></div></div>
+      <span id="hpNum">100</span>
+    </div>
+  </div>
+
+  <div id="botright">
+    <div class="wslots">
+      <div class="wslot" id="slot0"><div class="k">1</div><div class="n">-</div></div>
+      <div class="wslot" id="slot1"><div class="k">2</div><div class="n">-</div></div>
+    </div>
+    <div id="ammoBig"><span id="ammoNow">0</span><span class="mag"> / <span id="ammoMag">0</span></span></div>
+  </div>
+</div>
+
+<!-- 모바일 -->
+<div id="touch" class="hidden">
+  <div id="joy"><div id="joyStick"></div></div>
+  <div class="tb" id="tFire">사격</div>
+  <div class="tb" id="tAim">조준</div>
+  <div class="tb" id="tJump">점프</div>
+  <div class="tb" id="tReload">장전</div>
+  <div class="tb" id="tPick">줍기</div>
+  <div class="tb" id="tStance">자세</div>
+</div>
+
+<div id="dmgflash"></div>
+<div id="dmgVignette"></div>
+
+<!-- 결과 -->
+<div id="result" class="overlay hidden">
+  <div class="res-title" id="resTitle">승리</div>
+  <div class="res-stat" id="resStat"></div>
+  <div class="panel" style="margin-top:22px;"><button class="btn" id="againBtn">다시 하기</button></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/js/loaders/GLTFLoader.js"></script>
+<script>
+/* 게임 로직은 game.js 에서 로드됩니다 */
+</script>
+<script src="game.js"></script>
+</body>
+</html>
