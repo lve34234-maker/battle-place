@@ -97,30 +97,128 @@ function toggleStance(s){
 
 /* ---------- 모델 로딩 ---------- */
 function loadAllModels(done){
-  const loader=new THREE.GLTFLoader();
   const list=[...WEAPON_IDS.map(id=>WEAPONS[id].model),"c4"];
   const uniq=[...new Set(list)];
-  let loaded=0;
+  let loaded=0, finished=false;
   const bar=document.getElementById('loadBar');
   const txt=document.getElementById('loadTxt');
 
+  function step(name, ok){
+    loaded++;
+    bar.style.width=(loaded/uniq.length*100)+"%";
+    txt.textContent=`모델 불러오는 중... (${loaded}/${uniq.length})`;
+    if(loaded>=uniq.length && !finished){
+      finished=true;
+      txt.textContent="준비 완료!";
+      setTimeout(done,250);
+    }
+  }
+
+  // 안전장치: 8초 안에 안 끝나면 그냥 시작(못 받은 총은 임시 박스)
+  setTimeout(()=>{ if(!finished){ finished=true; txt.textContent="시작!"; setTimeout(done,150); } }, 8000);
+
   uniq.forEach(name=>{
-    loader.load(name+".glb",
-      gltf=>{
-        glbModels[name]=gltf.scene;
-        loaded++;
-        bar.style.width=(loaded/uniq.length*100)+"%";
-        txt.textContent=`모델 불러오는 중... (${loaded}/${uniq.length})`;
-        if(loaded===uniq.length){ txt.textContent="준비 완료!"; setTimeout(done,300); }
-      },
-      undefined,
-      err=>{ // 실패해도 게임은 진행 (해당 총은 임시 박스로)
-        console.warn("로드 실패:",name,err);
-        loaded++;
-        bar.style.width=(loaded/uniq.length*100)+"%";
-        if(loaded===uniq.length) setTimeout(done,300);
-      });
+    fetch(name+".glb")
+      .then(r=>{ if(!r.ok) throw new Error("HTTP "+r.status); return r.arrayBuffer(); })
+      .then(buf=>{
+        try{ glbModels[name]=parseGLB(buf); }
+        catch(e){ console.warn("파싱 실패:",name,e); }
+        step(name,true);
+      })
+      .catch(err=>{ console.warn("로드 실패:",name,err); step(name,false); });
   });
+}
+
+/* ====== 내장 미니 GLB 로더 (외부 라이브러리 불필요) ======
+   우리 모델은 POSITION/NORMAL/TEXCOORD_0/INDICES, 삼각형만 써서
+   이 가벼운 파서로 충분히 읽을 수 있음. */
+function parseGLB(buffer){
+  const dv=new DataView(buffer);
+  // 헤더: magic(0x46546C67="glTF"), version, length
+  const magic=dv.getUint32(0,true);
+  if(magic!==0x46546C67) throw new Error("GLB 아님");
+  let off=12, json=null, bin=null;
+  while(off<dv.byteLength){
+    const clen=dv.getUint32(off,true);
+    const ctype=dv.getUint32(off+4,true);
+    const cstart=off+8;
+    if(ctype===0x4E4F534A){ // "JSON"
+      json=JSON.parse(new TextDecoder().decode(new Uint8Array(buffer,cstart,clen)));
+    }else if(ctype===0x004E4942){ // "BIN"
+      bin=new Uint8Array(buffer,cstart,clen);
+    }
+    off=cstart+clen+ (clen%4?4-clen%4:0); // 4바이트 정렬
+  }
+  if(!json) throw new Error("JSON 없음");
+
+  // accessor 데이터를 꺼내는 함수
+  const compSize={5120:1,5121:1,5122:2,5123:2,5125:4,5126:4};
+  const typeNum={SCALAR:1,VEC2:2,VEC3:3,VEC4:4,MAT4:16};
+  function readAccessor(idx){
+    const acc=json.accessors[idx];
+    const bv=json.bufferViews[acc.bufferView];
+    const start=(bv.byteOffset||0)+(acc.byteOffset||0);
+    const count=acc.count*typeNum[acc.type];
+    const ct=acc.componentType;
+    if(ct===5126) return new Float32Array(bin.buffer, bin.byteOffset+start, count);
+    if(ct===5125) return new Uint32Array(bin.buffer, bin.byteOffset+start, count);
+    if(ct===5123) return new Uint16Array(bin.buffer, bin.byteOffset+start, count);
+    if(ct===5121) return new Uint8Array(bin.buffer, bin.byteOffset+start, count);
+    throw new Error("미지원 componentType "+ct);
+  }
+
+  // 텍스처 이미지(있으면) → THREE.Texture
+  function loadTexture(matIdx,cb){
+    try{
+      const mat=json.materials[matIdx];
+      const baseTex=mat&&mat.pbrMetallicRoughness&&mat.pbrMetallicRoughness.baseColorTexture;
+      if(!baseTex) return cb(null);
+      const tex=json.textures[baseTex.index];
+      const img=json.images[tex.source];
+      if(img.bufferView===undefined) return cb(null);
+      const bv=json.bufferViews[img.bufferView];
+      const start=bv.byteOffset||0;
+      const slice=bin.slice(start,start+bv.byteLength);
+      const blob=new Blob([slice],{type:img.mimeType||"image/png"});
+      const url=URL.createObjectURL(blob);
+      const t=new THREE.TextureLoader().load(url,()=>cb(t));
+      t.flipY=false; // glTF는 flipY=false
+    }catch(e){ cb(null); }
+  }
+
+  // 메시들을 합쳐 하나의 Group으로
+  const group=new THREE.Group();
+  json.meshes.forEach(mesh=>{
+    mesh.primitives.forEach(prim=>{
+      const geo=new THREE.BufferGeometry();
+      const pos=readAccessor(prim.attributes.POSITION);
+      geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
+      if(prim.attributes.NORMAL!==undefined)
+        geo.setAttribute('normal',new THREE.BufferAttribute(readAccessor(prim.attributes.NORMAL),3));
+      else geo.computeVertexNormals();
+      if(prim.attributes.TEXCOORD_0!==undefined)
+        geo.setAttribute('uv',new THREE.BufferAttribute(readAccessor(prim.attributes.TEXCOORD_0),2));
+      if(prim.indices!==undefined){
+        const idx=readAccessor(prim.indices);
+        geo.setIndex(new THREE.BufferAttribute(idx,1));
+      }
+      // 기본 재질 (색은 glTF baseColorFactor 또는 회색)
+      let color=0xaaaaaa;
+      const m=json.materials&&prim.material!==undefined?json.materials[prim.material]:null;
+      if(m&&m.pbrMetallicRoughness&&m.pbrMetallicRoughness.baseColorFactor){
+        const c=m.pbrMetallicRoughness.baseColorFactor;
+        color=new THREE.Color(c[0],c[1],c[2]).getHex();
+      }
+      const material=new THREE.MeshLambertMaterial({color});
+      const mObj=new THREE.Mesh(geo,material);
+      // 텍스처 비동기 적용
+      if(prim.material!==undefined)
+        loadTexture(prim.material,tex=>{ if(tex){ material.map=tex; material.color.set(0xffffff); material.needsUpdate=true; } });
+      group.add(mObj);
+    });
+  });
+  // 크기 정규화는 이미 변환 때 했으므로 그대로
+  return group;
 }
 
 /* GLB 복제본 만들기 (여러 곳에 같은 모델 쓸 때) */
