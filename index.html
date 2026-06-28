@@ -238,7 +238,15 @@
   <div class="panel" style="margin-top:22px;"><button class="btn" id="againBtn">다시 하기</button></div>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="game.js"></script>
+<!-- 최신 Three.js (ES 모듈) — PBR 빛 반사 / 그림자 / 물리 -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/three.module.js",
+    "three/addons/": "./vendor/three/addons/"
+  }
+}
+</script>
+<script type="module" src="src/main.js"></script>
 </body>
 </html>
