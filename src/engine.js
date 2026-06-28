@@ -24,6 +24,7 @@ export function initEngine() {
   scene.fog = new THREE.Fog(0xbcc9d6, 140, 620);
 
   const camera = new THREE.PerspectiveCamera(74, innerWidth / innerHeight, 0.08, 1400);
+  scene.add(camera);   // 카메라에 부착된 1인칭 무기가 렌더되도록
 
   /* ---- 하늘 (실제 대기 산란) ---- */
   const sky = new Sky();

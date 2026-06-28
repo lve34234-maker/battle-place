@@ -39,17 +39,33 @@ export async function loadWeaponModels(onProgress) {
   })));
 }
 
-/* 카메라에 붙는 뷰모델 생성 (1인칭 손에 든 총) */
-export function makeViewModel(weaponId) {
+/* 무기 뷰모델 생성. 모델 중심을 원점에 맞추고, 가장 긴 축(=총열)을
+   앞쪽(-Z)으로 정렬한 뒤 targetLen(m)으로 정규화한 래퍼를 반환.
+   → GLB마다 다른 기본 축을 일관되게 보정해 항상 "들고 있는 총"으로 보임 */
+export function makeViewModel(weaponId, targetLen = 0.6) {
   const src = modelCache[weaponId];
   if (!src) return null;
-  const m = src.clone(true);
-  // 모델 크기 정규화
-  const box = new THREE.Box3().setFromObject(m);
+  const inner = src.clone(true);
+
+  const box = new THREE.Box3().setFromObject(inner);
   const size = new THREE.Vector3(); box.getSize(size);
-  const scale = 0.5 / (Math.max(size.x, size.y, size.z) || 1);
-  m.scale.setScalar(scale);
-  return m;
+  const center = new THREE.Vector3(); box.getCenter(center);
+
+  // 중심을 원점으로
+  inner.position.sub(center);
+
+  // 가장 긴 축을 Z로 회전 (총열을 앞으로)
+  const align = new THREE.Group();
+  align.add(inner);
+  if (size.x >= size.y && size.x >= size.z) align.rotation.y = Math.PI / 2;   // X→Z
+  else if (size.y >= size.x && size.y >= size.z) align.rotation.x = Math.PI / 2; // Y→Z
+  // size.z 최대면 그대로
+
+  const longest = Math.max(size.x, size.y, size.z) || 1;
+  const wrap = new THREE.Group();
+  wrap.add(align);
+  wrap.scale.setScalar(targetLen / longest);
+  return wrap;
 }
 
 /* 총알(탄도) 발사. owner: "player" 또는 bot 객체 */

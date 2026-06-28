@@ -14,8 +14,8 @@ export const player = {
   hp: CFG.maxHealth, dead: false, nick: "플레이어",
   weapons: [null, null], ammo: [0, 0], slot: 0,
   nextFire: 0, reloading: false, reloadEnd: 0,
-  stance: "stand", aiming: false, tpp: true,
-  recoil: 0, viewModel: null, bodyWeapon: null, body: null,
+  stance: "stand", aiming: false, tpp: false,
+  recoil: 0, kick: 0, viewModel: null, bodyWeapon: null, body: null, weaponRig: null,
   kills: 0,
 };
 
@@ -51,22 +51,21 @@ export function selectSlot(scene, slot) {
   refreshWeaponModel(scene);
 }
 
-function refreshWeaponModel(scene) {
+function refreshWeaponModel() {
   const wid = player.weapons[player.slot];
   if (player.viewModel) { player.viewModel.removeFromParent(); player.viewModel = null; }
   if (player.bodyWeapon) { player.bodyWeapon.removeFromParent(); player.bodyWeapon = null; }
   if (!wid) return;
 
-  const vm = makeViewModel(wid);
-  if (vm) {
-    vm.position.set(0.18, -0.2, -0.45);
-    vm.rotation.y = Math.PI;
-    player.viewModel = vm;
-  }
-  const bw = makeViewModel(wid);
+  /* 1인칭 뷰모델 (총열은 이미 -Z 정렬됨; rig에서 위치/각도 제어) */
+  const vm = makeViewModel(wid, 0.5);
+  if (vm) player.viewModel = vm;
+
+  /* 3인칭: 몸체 손 위치에 부착 (총열을 앞 +Z로) */
+  const bw = makeViewModel(wid, 0.55);
   if (bw) {
-    bw.position.set(0.35, 1.15, 0.2);
-    bw.rotation.y = Math.PI / 2;
+    bw.position.set(0.5, 1.05, 0.05);   // 오른쪽 옆구리 — 뒤 카메라에서 보임
+    bw.rotation.y = 0;                  // 총열 앞(+Z)
     player.body.add(bw);
     player.bodyWeapon = bw;
   }
@@ -135,18 +134,19 @@ export function updatePlayer(scene, camera, input, dt, now, cb) {
   /* ---- 사격 ---- */
   if (input.fire) tryFire(scene, camera, now, cb);
 
-  /* 반동 회복 */
+  /* 반동/킥 회복 */
   player.recoil = Math.max(0, player.recoil - dt * 4);
+  player.kick = Math.max(0, player.kick - dt * 6);
 
-  /* ---- 몸체 갱신 ---- */
+  /* ---- 몸체 갱신 (자세는 높이로만 표현, 크기 왜곡 없음) ---- */
   player.body.position.copy(player.pos);
   player.body.rotation.y = player.yaw;
-  const crouchScale = player.stance === "prone" ? 0.4 : player.stance === "crouch" ? 0.7 : 1;
-  player.body.scale.y = crouchScale;
+  player.body.position.y = player.stance === "prone" ? -0.7 : player.stance === "crouch" ? -0.4 : 0;
+  player.body.position.y += player.pos.y;
 
   /* ---- 카메라 ---- */
   const eye = CFG.eyeHeight * st.h;
-  const aimPitch = player.pitch + player.recoil * 0.06;
+  const aimPitch = player.pitch + player.recoil * 0.04;
   if (player.tpp) {
     // 3인칭: 어깨 뒤
     const head = player.pos.clone(); head.y += eye;
@@ -165,13 +165,26 @@ export function updatePlayer(scene, camera, input, dt, now, cb) {
     camera.rotation.set(0, 0, 0);
     camera.rotateY(player.yaw);
     camera.rotateX(aimPitch);
-    if (player.viewModel) {
-      if (player.viewModel.parent !== camera) camera.add(player.viewModel);
-      player.viewModel.visible = true;
-      const aimX = player.aiming ? 0 : 0.18;
-      player.viewModel.position.x += (aimX - player.viewModel.position.x) * 0.3;
+
+    // 카메라에 무기 rig 보장
+    if (!player.weaponRig) { player.weaponRig = new THREE.Group(); camera.add(player.weaponRig); }
+    if (player.viewModel && player.viewModel.parent !== player.weaponRig) {
+      player.weaponRig.clear();
+      player.weaponRig.add(player.viewModel);
     }
+    if (player.viewModel) player.viewModel.visible = true;
     if (player.bodyWeapon) player.bodyWeapon.visible = false;
+
+    // 조준 시 화면 중앙으로, 평상시 우하단. 반동 킥은 뒤(+Z)로.
+    const rig = player.weaponRig;
+    const tx = player.aiming ? 0.02 : 0.16;
+    const ty = player.aiming ? -0.06 : -0.16;
+    const tz = (player.aiming ? -0.42 : -0.4) + player.kick * 0.12;
+    rig.position.x += (tx - rig.position.x) * 0.4;
+    rig.position.y += (ty - rig.position.y) * 0.4;
+    rig.position.z += (tz - rig.position.z) * 0.5;
+    rig.rotation.y = player.aiming ? 0.04 : 0.22;   // 측면이 보이게 살짝 틀기
+    rig.rotation.x = 0.05 + player.kick * 0.25;
   }
 }
 
@@ -213,9 +226,10 @@ function tryFire(scene, camera, now, cb) {
   const origin = camera.position.clone().addScaledVector(dir, 0.6);
   fireBullet(scene, origin, dir, w.dmg, true);
 
-  // 반동
+  // 반동 (시점 튐 + 무기 킥)
   player.recoil = Math.min(6, player.recoil + w.recoil);
   player.pitch += w.recoil * 0.004;
+  player.kick = Math.min(1.2, player.kick + w.recoil * 0.18);
 
   cb && cb.onFire && cb.onFire(w);
 }

@@ -117,9 +117,11 @@ export function drawMinimap(player, bots, zone) {
   ctx.stroke();
 }
 
-export function showResult(win, kills, rank, total) {
+export function showResult(win) {
   showScreen("result");
-  $("resTitle").textContent = win ? "이겼닭! 오늘 저녁은 치킨!" : "패배";
+  $("resTitle").textContent = win ? "최후 생존! 오늘 저녁은 치킨!" : "사망";
   $("resTitle").className = "res-title " + (win ? "res-win" : "res-lose");
-  $("resStat").innerHTML = `순위 <span>#${rank}</span> / ${total}　·　처치 <span>${kills}</span>`;
+  $("resStat").innerHTML = win
+    ? `모든 자기장 단계를 <span>생존</span>했습니다`
+    : `자기장에 휩쓸렸습니다`;
 }
