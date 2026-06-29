@@ -105,6 +105,14 @@ let state = "loading";
 let dayTime = 0.30;   // 0~1 (0=자정,0.5=정오)
 const DAY_LEN = 480;  // 하루 길이(초)
 
+/* 건축(블록 쌓기) */
+const G = 2;                 // 블록 한 칸 크기
+let blocks = [];             // {mesh,x,y,z,type}
+let buildMode = false;
+let buildMat = "wood";       // wood | stone
+let ghost = null;
+const _center = new THREE.Vector2(0, 0);
+
 const P = {
   pos: new THREE.Vector3(0, 30, 0), vel: new THREE.Vector3(),
   yaw: 0, pitch: 0, onGround: false,
@@ -299,7 +307,7 @@ function scatterResources() {
       const m = mk(x, y, z); m.position.set(x, y, z);
       m.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
       scene.add(m);
-      resources.push({ mesh: m, type, x, z, y, hp: type === "rock" ? 5 : type === "tree" ? 4 : 2 });
+      resources.push({ mesh: m, type, x, z, y, hp: type === "rock" ? 5 : type === "tree" ? 4 : 2, rad: type === "rock" ? 1.1 : type === "tree" ? 0.6 : 0 });
       n++;
     }
   };
@@ -332,20 +340,26 @@ function spawnAnimals(n) {
     const hide2 = new THREE.MeshStandardMaterial({ color: 0x8a5b35, roughness: 0.9 });
     const body = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.8, 0.7), hide);
     body.position.y = 1.0; g.add(body);
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), hide2);
-    head.position.set(0.85, 1.25, 0); g.add(head);
-    // 다리 4개
-    const legGeo = new THREE.BoxGeometry(0.18, 0.7, 0.18);
+    const neck = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.5, 0.4), hide);
+    neck.position.set(0.72, 1.25, 0); g.add(neck);
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.45, 0.45), hide2);
+    head.position.set(1.0, 1.5, 0); g.add(head);
+    // 다리 4개 — 엉덩이(위쪽)에서 회전하도록 지오메트리를 아래로 이동
+    const legGeo = new THREE.BoxGeometry(0.2, 0.8, 0.2); legGeo.translate(0, -0.4, 0);
+    const legs = [];
     [[0.5, 0.25], [0.5, -0.25], [-0.5, 0.25], [-0.5, -0.25]].forEach(([lx, lz]) => {
       const leg = new THREE.Mesh(legGeo, hide2);
-      leg.position.set(lx, 0.35, lz); g.add(leg);
+      leg.position.set(lx, 0.75, lz); g.add(leg); legs.push(leg);
     });
-    // 꼬리
-    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.4), hide2);
-    tail.position.set(-0.8, 1.05, 0); g.add(tail);
+    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.45), hide2);
+    tail.position.set(-0.78, 1.1, 0); g.add(tail);
     g.traverse(o => { if (o.isMesh) o.castShadow = true; });
     g.position.set(x, y, z); scene.add(g);
-    animals.push({ mesh: g, x, z, hp: 30, dir: Math.random() * 6.28, retarget: 0, alive: true });
+    animals.push({
+      mesh: g, legs, x, z, hp: 30, alive: true,
+      heading: Math.random() * 6.28, targetHeading: Math.random() * 6.28,
+      speed: 0, state: "graze", timer: Math.random() * 3, phase: Math.random() * 6.28,
+    });
   }
 }
 
@@ -357,6 +371,9 @@ function bindInput() {
     keys[e.code] = true;
     if (state !== "playing") return;
     if (e.code === "KeyE") toggleCraft();
+    if (e.code === "KeyB") toggleBuild();
+    if (e.code === "KeyQ" && buildMode) toggleBuildMat();
+    if (e.code === "KeyX" && buildMode) removeBlock();
     if (e.code === "KeyR") startReload();
     if (e.code === "KeyF") interact();
     if (e.code === "Space") { if (P.onGround) { P.vel.y = 8.5; P.onGround = false; } }
@@ -392,6 +409,7 @@ function animate() {
   updateAnimals(dt);
   updateProjectiles(dt);
   updateOthers(dt);
+  updateBuild();
   updateDayNight(dt);
   updateCamera();
   Net.sendState({
@@ -421,10 +439,15 @@ function updatePlayer(dt) {
   P.vel.x = move.x * base; P.vel.z = move.z * base;
 
   P.vel.y -= 22 * dt; // 중력
-  P.pos.x += P.vel.x * dt; P.pos.z += P.vel.z * dt; P.pos.y += P.vel.y * dt;
 
-  // 지형 충돌 (눈높이 1.8)
-  const ground = heightAt(P.pos.x, P.pos.z) + 1.8;
+  // 수평 충돌 (나무·돌·동물·블록 통과 금지, 벽 따라 미끄러짐)
+  const nx = P.pos.x + P.vel.x * dt, nz = P.pos.z + P.vel.z * dt;
+  if (!blockedAt(nx, P.pos.z)) P.pos.x = nx;
+  if (!blockedAt(P.pos.x, nz)) P.pos.z = nz;
+  P.pos.y += P.vel.y * dt;
+
+  // 수직 충돌 (지형 + 블록 위에 서기, 눈높이 1.8)
+  const ground = supportHeight(P.pos.x, P.pos.z) + 1.8;
   if (P.pos.y <= ground) { P.pos.y = ground; P.vel.y = 0; P.onGround = true; }
   else P.onGround = false;
 
@@ -441,8 +464,111 @@ function updatePlayer(dt) {
   // 상호작용 힌트
   const tgt = aimTarget();
   const hint = document.getElementById("hint");
-  if (tgt) { hint.classList.add("show"); document.getElementById("hintTxt").innerHTML = tgt.label; }
+  if (buildMode) { hint.classList.remove("show"); }
+  else if (tgt) { hint.classList.add("show"); document.getElementById("hintTxt").innerHTML = tgt.label; }
   else hint.classList.remove("show");
+}
+
+/* ---------------- 충돌 ---------------- */
+function blockedAt(x, z) {
+  const pr = 0.45, feet = P.pos.y - 1.8, head = feet + 1.7;
+  for (const r of resources) {
+    if (!r.rad) continue;
+    const dx = x - r.x, dz = z - r.z, rr = pr + r.rad;
+    if (dx * dx + dz * dz < rr * rr) return true;
+  }
+  for (const a of animals) {
+    if (!a.alive) continue;
+    const dx = x - a.x, dz = z - a.z, rr = pr + 0.6;
+    if (dx * dx + dz * dz < rr * rr) return true;
+  }
+  for (const b of blocks) {
+    if (Math.abs(x - b.x) < G / 2 + pr && Math.abs(z - b.z) < G / 2 + pr) {
+      const top = b.y + G / 2, bot = b.y - G / 2;
+      if (top > feet + 0.6 && bot < head) return true; // 바닥/계단은 통과(그 위에 서짐)
+    }
+  }
+  return false;
+}
+function supportHeight(x, z) {
+  let base = heightAt(x, z); const feet = P.pos.y - 1.8;
+  for (const b of blocks) {
+    if (Math.abs(x - b.x) < G / 2 + 0.35 && Math.abs(z - b.z) < G / 2 + 0.35) {
+      const top = b.y + G / 2;
+      if (top <= feet + 0.7 && top > base) base = top;
+    }
+  }
+  return base;
+}
+
+/* ---------------- 건축(블록) ---------------- */
+function toggleBuild() {
+  buildMode = !buildMode;
+  document.getElementById("buildBadge").classList.toggle("hidden", !buildMode);
+  if (buildMode && !ghost) makeGhost();
+  if (ghost) ghost.visible = buildMode;
+  updateBuildBadge();
+}
+function toggleBuildMat() {
+  buildMat = buildMat === "wood" ? "stone" : "wood";
+  updateBuildBadge();
+}
+function updateBuildBadge() {
+  document.getElementById("buildBadge").innerHTML =
+    `🏠 건축 모드 — 좌클릭 <b>설치</b> · X <b>제거</b> · Q 재료(<b>${buildMat === "wood" ? "🪵 나무" : "🪨 돌"}</b>) · B 종료`;
+}
+function makeGhost() {
+  ghost = new THREE.Mesh(new THREE.BoxGeometry(G, G, G),
+    new THREE.MeshBasicMaterial({ color: 0x66ff88, transparent: true, opacity: 0.35, depthWrite: false }));
+  ghost.add(new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(G, G, G)),
+    new THREE.LineBasicMaterial({ color: 0x183 })));
+  ghost.visible = false; scene.add(ghost);
+}
+function buildTarget() {
+  raycaster.setFromCamera(_center, camera);
+  const meshes = [terrainMesh]; for (const b of blocks) meshes.push(b.mesh);
+  const hits = raycaster.intersectObjects(meshes, false);
+  if (!hits.length || hits[0].distance > 9) return null;
+  const h = hits[0];
+  if (h.object === terrainMesh) {
+    const gx = Math.round(h.point.x / G) * G, gz = Math.round(h.point.z / G) * G;
+    const gy = Math.round((heightAt(gx, gz) + G / 2) / G) * G;
+    return new THREE.Vector3(gx, gy, gz);
+  }
+  const b = blocks.find(bb => bb.mesh === h.object); if (!b) return null;
+  const n = h.face.normal.clone().transformDirection(h.object.matrixWorld);
+  n.x = Math.abs(n.x) > 0.5 ? Math.sign(n.x) : 0;
+  n.y = Math.abs(n.y) > 0.5 ? Math.sign(n.y) : 0;
+  n.z = Math.abs(n.z) > 0.5 ? Math.sign(n.z) : 0;
+  return new THREE.Vector3(b.x + n.x * G, b.y + n.y * G, b.z + n.z * G);
+}
+function placeBlock() {
+  const t = buildTarget();
+  if (!t) { toast("설치할 곳을 바라보세요"); return; }
+  if (blocks.some(b => b.x === t.x && b.y === t.y && b.z === t.z)) return;
+  const cost = buildMat === "wood" ? { wood: 2 } : { stone: 3 };
+  if (!canAfford(cost)) { toast(`재료 부족! (${buildMat === "wood" ? "🪵2" : "🪨3"})`); return; }
+  for (const k in cost) P.inv[k] -= cost[k];
+  const mat = buildMat === "wood"
+    ? new THREE.MeshStandardMaterial({ color: 0x9a6b35, roughness: 0.92 })
+    : new THREE.MeshStandardMaterial({ color: 0x8a8a8a, roughness: 0.85, metalness: 0.04 });
+  const m = new THREE.Mesh(new THREE.BoxGeometry(G, G, G), mat);
+  m.position.copy(t); m.castShadow = true; m.receiveShadow = true; scene.add(m);
+  blocks.push({ mesh: m, x: t.x, y: t.y, z: t.z, type: buildMat });
+}
+function removeBlock() {
+  raycaster.setFromCamera(_center, camera);
+  const meshes = blocks.map(b => b.mesh);
+  const hits = raycaster.intersectObjects(meshes, false);
+  if (!hits.length || hits[0].distance > 9) return;
+  const b = blocks.find(bb => bb.mesh === hits[0].object); if (!b) return;
+  scene.remove(b.mesh); blocks = blocks.filter(x => x !== b);
+  addItem(b.type, 1); // 일부 환급
+}
+function updateBuild() {
+  if (!buildMode || !ghost) { if (ghost) ghost.visible = false; return; }
+  const t = buildTarget();
+  if (t) { ghost.visible = true; ghost.position.copy(t); } else ghost.visible = false;
 }
 
 /* ---------------- 생존 스탯 ---------------- */
@@ -537,7 +663,7 @@ function respawnResource(type) {
   } : type === "rock" ? () => new THREE.Mesh(new THREE.DodecahedronGeometry(1.2, 0), new THREE.MeshStandardMaterial({ color: 0x808080, flatShading: true }))
     : () => new THREE.Mesh(new THREE.IcosahedronGeometry(0.8, 0), new THREE.MeshStandardMaterial({ color: 0x4f8b3a, flatShading: true }));
   const m = mk(); m.position.set(x, y, z); m.traverse(o => { if (o.isMesh) o.castShadow = true; });
-  scene.add(m); resources.push({ mesh: m, type, x, z, y, hp: type === "rock" ? 5 : type === "tree" ? 4 : 2 });
+  scene.add(m); resources.push({ mesh: m, type, x, z, y, hp: type === "rock" ? 5 : type === "tree" ? 4 : 2, rad: type === "rock" ? 1.1 : type === "tree" ? 0.6 : 0 });
 }
 
 function addItem(k, n) { P.inv[k] = (P.inv[k] || 0) + n; }
@@ -545,6 +671,7 @@ function addItem(k, n) { P.inv[k] = (P.inv[k] || 0) + n; }
 /* ---------------- 공격 / 사격 ---------------- */
 function primaryAction() {
   if (!P.alive) return;
+  if (buildMode) { placeBlock(); return; }
   const w = recipeById(P.hotbar[P.slot]);
   if (performance.now() < P.nextAct) return;
   if (w.kind === "melee" || w.kind === "build") {
@@ -668,16 +795,37 @@ function updateProjectiles(dt) {
 }
 
 /* ---------------- 동물 AI ---------------- */
+function animalBlocked(x, z, self) {
+  for (const r of resources) { if (!r.rad) continue; const dx = x - r.x, dz = z - r.z, rr = 0.6 + r.rad; if (dx * dx + dz * dz < rr * rr) return true; }
+  for (const o of animals) { if (o === self || !o.alive) continue; const dx = x - o.x, dz = z - o.z; if (dx * dx + dz * dz < 1.2) return true; }
+  return false;
+}
 function updateAnimals(dt) {
   for (const a of animals) {
     if (!a.alive) continue;
-    a.retarget -= dt;
-    if (a.retarget <= 0) { a.retarget = 2 + Math.random() * 3; a.dir = Math.random() * 6.28; }
-    const sp = 2.2;
-    const nx = a.x + Math.cos(a.dir) * sp * dt, nz = a.z + Math.sin(a.dir) * sp * dt;
-    if (heightAt(nx, nz) > SEA + 1) { a.x = nx; a.z = nz; } else a.dir += 2;
-    a.mesh.position.set(a.x, heightAt(a.x, a.z), a.z);
-    a.mesh.rotation.y = -a.dir + Math.PI / 2;
+    a.timer -= dt;
+    const pd = Math.hypot(P.pos.x - a.x, P.pos.z - a.z);
+    if (pd < 11) { // 플레이어가 가까우면 도망
+      a.state = "flee"; a.targetHeading = Math.atan2(a.z - P.pos.z, a.x - P.pos.x); a.speed = 5.5; a.timer = 1;
+    } else if (a.timer <= 0) { // 풀 뜯기 ↔ 어슬렁
+      if (Math.random() < 0.45) { a.state = "graze"; a.speed = 0; a.timer = 2 + Math.random() * 3; }
+      else { a.state = "walk"; a.targetHeading = Math.random() * Math.PI * 2; a.speed = 1.7; a.timer = 2.5 + Math.random() * 3; }
+    }
+    // 부드러운 방향 전환
+    let dh = a.targetHeading - a.heading;
+    while (dh > Math.PI) dh -= 2 * Math.PI; while (dh < -Math.PI) dh += 2 * Math.PI;
+    a.heading += dh * Math.min(1, dt * 3.5);
+    // 이동(물/장애물 회피)
+    if (a.speed > 0.01) {
+      const nx = a.x + Math.cos(a.heading) * a.speed * dt, nz = a.z + Math.sin(a.heading) * a.speed * dt;
+      if (heightAt(nx, nz) > SEA + 1 && !animalBlocked(nx, nz, a)) { a.x = nx; a.z = nz; a.phase += dt * a.speed * 2.2; }
+      else { a.targetHeading = a.heading + Math.PI * (0.6 + Math.random() * 0.6); a.timer = 0.3; }
+    }
+    const gy = heightAt(a.x, a.z);
+    a.mesh.position.set(a.x, gy + (a.speed > 0.01 ? Math.abs(Math.sin(a.phase)) * 0.07 : 0), a.z);
+    a.mesh.rotation.y = -a.heading;
+    if (a.legs) for (let i = 0; i < a.legs.length; i++)
+      a.legs[i].rotation.x = a.speed > 0.01 ? Math.sin(a.phase + (i % 2 ? Math.PI : 0)) * 0.6 : 0;
   }
 }
 
@@ -1048,4 +1196,6 @@ function parseGLB(buffer) {
   bind("tUse", () => interact());
   bind("tCraft", () => toggleCraft());
   bind("tReload", () => startReload());
+  bind("tBuild", () => toggleBuild());
+  bind("tMat", () => { if (buildMode) toggleBuildMat(); else toast("건축 버튼을 먼저 누르세요"); });
 })();
