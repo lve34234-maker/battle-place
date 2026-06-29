@@ -145,13 +145,30 @@ let state = "loading";
 let dayTime = 0.30;   // 0~1 (0=자정,0.5=정오)
 const DAY_LEN = 480;  // 하루 길이(초)
 
-/* 건축(블록 쌓기) */
-const G = 2;                 // 블록 한 칸 크기
-let blocks = [];             // {mesh,x,y,z,type}
+/* 맵 크기 */
+const MAP = 1400, MAPR = MAP / 2;
+
+/* 건축 — 미리 만들어진 구조물/가구를 격자에 설치 */
+const G = 3;                 // 한 칸 크기 (사람이 지나갈 만큼 키움)
+let blocks = [];             // 설치물 {mesh,x,y,z,hw,hd,topY,botY,solid,stand}
 let buildMode = false;
-let buildMat = "wood";       // wood | stone
+let buildIdx = 0;            // 현재 선택한 조각
+let buildYaw = 0;           // 회전(라디안)
 let ghost = null;
 const _center = new THREE.Vector2(0, 0);
+const PIECES = [
+  { id: "floor", name: "바닥", icon: "⬜", cost: { wood: 2 } },
+  { id: "wall", name: "벽", icon: "🧱", cost: { wood: 3 } },
+  { id: "window", name: "창문벽", icon: "🪟", cost: { wood: 3 } },
+  { id: "door", name: "문", icon: "🚪", cost: { wood: 3 } },
+  { id: "roof", name: "지붕", icon: "🔺", cost: { wood: 3 } },
+  { id: "stonewall", name: "돌벽", icon: "🪨", cost: { stone: 4 } },
+  { id: "table", name: "탁자(가구)", icon: "🟫", cost: { wood: 2 } },
+  { id: "chair", name: "의자(가구)", icon: "💺", cost: { wood: 1 } },
+  { id: "bed", name: "침대(가구)", icon: "🛏️", cost: { wood: 4, fiber: 3 } },
+  { id: "crate", name: "상자(가구)", icon: "📦", cost: { wood: 3 } },
+  { id: "torch", name: "횃불", icon: "🔦", cost: { wood: 1, fiber: 1 } },
+];
 
 const P = {
   pos: new THREE.Vector3(0, 30, 0), vel: new THREE.Vector3(),
@@ -207,7 +224,7 @@ function startGame() {
 
   initThree();
   buildWorld();
-  spawnAnimals(14);
+  spawnAnimals(26);
   // 시작 위치: 육지 위
   let sx = 0, sz = 0, tries = 0;
   do { sx = (Math.random() - .5) * 200; sz = (Math.random() - .5) * 200; tries++; }
@@ -279,7 +296,7 @@ function initThree() {
     });
     sky = new THREE.Mesh(new THREE.SphereGeometry(1500, 32, 16), skyMat); scene.add(sky); skyMode = "dome";
   }
-  scene.fog = new THREE.FogExp2(0xbcd2e8, 0.0016);
+  scene.fog = new THREE.FogExp2(0xbcd2e8, 0.0009);
 
   addEventListener("resize", () => {
     camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
@@ -353,7 +370,7 @@ function makeNormalMap(size, strength) {
    월드: 현실적 지형 + 바다 + 채집물
    ============================================================ */
 function buildWorld() {
-  const SIZE = 700, SEG = 200;
+  const SIZE = MAP, SEG = 280;
   const geo = new THREE.PlaneGeometry(SIZE, SIZE, SEG, SEG);
   geo.rotateX(-Math.PI / 2);
   const pos = geo.attributes.position;
@@ -394,7 +411,7 @@ function buildWorld() {
   // 채집물 + 무성한 풀 + 버려진 차량 + 사용자 모델
   scatterResources();
   scatterGrass();
-  scatterVehicles(6);
+  scatterVehicles(10);
   placeCustomModels();
 }
 
@@ -406,7 +423,7 @@ function placeCustomModels() {
     const lo = cm.water ? SEA - 2.5 : SEA + 1, hi = cm.water ? SEA + 0.6 : 34;
     while (placed < (cm.count || 20) && tries < (cm.count || 20) * 50) {
       tries++;
-      const x = (Math.random() - .5) * 640, z = (Math.random() - .5) * 640, y = heightAt(x, z);
+      const x = (Math.random() - .5) * (MAP * 0.95), z = (Math.random() - .5) * (MAP * 0.95), y = heightAt(x, z);
       if (y < lo || y > hi) continue;
       const m = glbModels[cm.file].clone(true);
       m.position.set(x, cm.water ? SEA : y, z); m.rotation.y = Math.random() * 6.28;
@@ -425,13 +442,13 @@ function placeCustomModels() {
 function scatterGrass() {
   const blade = new THREE.ConeGeometry(0.13, 0.75, 4); blade.translate(0, 0.37, 0);
   const mat = new THREE.MeshStandardMaterial({ color: 0x4c7a2e, roughness: 1, flatShading: true });
-  const COUNT = 2600;
+  const COUNT = 5200;
   const im = new THREE.InstancedMesh(blade, mat, COUNT);
   const o = new THREE.Object3D(); const tint = new THREE.Color();
   let placed = 0;
   for (let i = 0; i < COUNT * 4 && placed < COUNT; i++) {
-    const x = (Math.random() - .5) * 660, z = (Math.random() - .5) * 660, y = heightAt(x, z);
-    if (y < SEA + 0.8 || y > 30) continue;
+    const x = (Math.random() - .5) * (MAP * 0.96), z = (Math.random() - .5) * (MAP * 0.96), y = heightAt(x, z);
+    if (y < SEA + 0.8 || y > 42) continue;
     o.position.set(x, y, z); o.rotation.y = Math.random() * 6.28;
     const s = 0.7 + Math.random() * 1.1; o.scale.set(s, s + Math.random() * 0.6, s);
     o.updateMatrix(); im.setMatrixAt(placed, o.matrix);
@@ -450,7 +467,7 @@ function scatterResources() {
     let n = 0, tries = 0;
     while (n < count && tries < count * 30) {
       tries++;
-      const x = (Math.random() - .5) * 640, z = (Math.random() - .5) * 640;
+      const x = (Math.random() - .5) * (MAP * 0.95), z = (Math.random() - .5) * (MAP * 0.95);
       const y = heightAt(x, z);
       if (type === "tree" && (y < SEA + 2 || y > 36)) continue;
       if (type === "rock" && y < SEA + 1) continue;
@@ -462,9 +479,9 @@ function scatterResources() {
       n++;
     }
   };
-  place("tree", 150, makeTree);
-  place("rock", 130, makeRock);
-  place("bush", 120, makeBush);
+  place("tree", 320, makeTree);
+  place("rock", 230, makeRock);
+  place("bush", 230, makeBush);
 }
 
 /* ---- 디테일 있는 채집물 모델 (scatter & 리스폰 공용) ---- */
@@ -518,7 +535,7 @@ function scatterVehicles(n) {
   let placed = 0, tries = 0;
   while (placed < n && tries < n * 40) {
     tries++;
-    const x = (Math.random() - .5) * 560, z = (Math.random() - .5) * 560, y = heightAt(x, z);
+    const x = (Math.random() - .5) * (MAP * 0.85), z = (Math.random() - .5) * (MAP * 0.85), y = heightAt(x, z);
     if (y < SEA + 1.2 || y > 26) continue;
     const m = glbModels.c4.clone(true);
     m.position.set(x, y, z); m.rotation.y = Math.random() * 6.28;
@@ -532,7 +549,7 @@ function scatterVehicles(n) {
 function spawnAnimals(n) {
   for (let i = 0; i < n; i++) {
     let x, z, y, t = 0;
-    do { x = (Math.random() - .5) * 500; z = (Math.random() - .5) * 500; y = heightAt(x, z); t++; }
+    do { x = (Math.random() - .5) * (MAP * 0.85); z = (Math.random() - .5) * (MAP * 0.85); y = heightAt(x, z); t++; }
     while (y < SEA + 2 && t < 40);
     const g = new THREE.Group();
     const hide = new THREE.MeshStandardMaterial({ color: 0x9a6b3f, roughness: 0.9 });
@@ -583,7 +600,7 @@ function makeZombie() {
 function spawnZombie() {
   const ang = Math.random() * Math.PI * 2, dist = 28 + Math.random() * 22;
   let x = P.pos.x + Math.cos(ang) * dist, z = P.pos.z + Math.sin(ang) * dist;
-  x = Math.max(-340, Math.min(340, x)); z = Math.max(-340, Math.min(340, z));
+  x = Math.max(-(MAPR - 25), Math.min(MAPR - 25, x)); z = Math.max(-(MAPR - 25), Math.min(MAPR - 25, z));
   if (heightAt(x, z) < SEA + 1) return;
   const zm = makeZombie();
   zm.group.position.set(x, heightAt(x, z), z); scene.add(zm.group);
@@ -641,9 +658,9 @@ function bindInput() {
     if (state !== "playing") return;
     if (e.code === "KeyE") toggleCraft();
     if (e.code === "KeyB") toggleBuild();
-    if (e.code === "KeyQ" && buildMode) toggleBuildMat();
+    if (e.code === "KeyQ" && buildMode) cyclePiece(1);
     if (e.code === "KeyX" && buildMode) removeBlock();
-    if (e.code === "KeyR") startReload();
+    if (e.code === "KeyR") { if (buildMode) rotatePiece(); else startReload(); }
     if (e.code === "KeyH") eatFood();
     if (e.code === "KeyF") interact();
     if (e.code === "Space") { if (P.onGround) { P.vel.y = 8.5; P.onGround = false; } }
@@ -725,7 +742,7 @@ function updatePlayer(dt) {
   if (P.pos.y <= ground) { P.pos.y = ground; P.vel.y = 0; P.onGround = true; }
   else P.onGround = false;
 
-  const lim = 345;
+  const lim = MAPR - 12;
   P.pos.x = Math.max(-lim, Math.min(lim, P.pos.x));
   P.pos.z = Math.max(-lim, Math.min(lim, P.pos.z));
 
@@ -760,9 +777,9 @@ function blockedAt(x, z) {
     if (dx * dx + dz * dz < rr * rr) return true;
   }
   for (const b of blocks) {
-    if (Math.abs(x - b.x) < G / 2 + pr && Math.abs(z - b.z) < G / 2 + pr) {
-      const top = b.y + G / 2, bot = b.y - G / 2;
-      if (top > feet + 0.6 && bot < head) return true; // 바닥/계단은 통과(그 위에 서짐)
+    if (!b.solid) continue;
+    if (Math.abs(x - b.x) < b.hw + pr && Math.abs(z - b.z) < b.hd + pr) {
+      if (b.topY > feet + 0.6 && b.botY < head) return true; // 바닥/지붕은 통과(그 위에 서짐)
     }
   }
   return false;
@@ -770,9 +787,9 @@ function blockedAt(x, z) {
 function supportHeight(x, z) {
   let base = heightAt(x, z); const feet = P.pos.y - 1.8;
   for (const b of blocks) {
-    if (Math.abs(x - b.x) < G / 2 + 0.35 && Math.abs(z - b.z) < G / 2 + 0.35) {
-      const top = b.y + G / 2;
-      if (top <= feet + 0.7 && top > base) base = top;
+    if (!b.stand) continue;
+    if (Math.abs(x - b.x) < b.hw + 0.35 && Math.abs(z - b.z) < b.hd + 0.35) {
+      if (b.topY <= feet + 0.7 && b.topY > base) base = b.topY;
     }
   }
   return base;
@@ -786,17 +803,20 @@ function toggleBuild() {
   if (ghost) ghost.visible = buildMode;
   updateBuildBadge();
 }
-function toggleBuildMat() {
-  buildMat = buildMat === "wood" ? "stone" : "wood";
+function cyclePiece(dir) {
+  buildIdx = (buildIdx + (dir || 1) + PIECES.length) % PIECES.length;
   updateBuildBadge();
 }
+function rotatePiece() { buildYaw = (buildYaw + Math.PI / 2) % (Math.PI * 2); }
 function updateBuildBadge() {
+  const p = PIECES[buildIdx];
+  const cost = Object.entries(p.cost).map(([k, v]) => ICON[k] + v).join(" ");
   document.getElementById("buildBadge").innerHTML =
-    `🏠 건축 모드 — 좌클릭 <b>설치</b> · X <b>제거</b> · Q 재료(<b>${buildMat === "wood" ? "🪵 나무" : "🪨 돌"}</b>) · B 종료`;
+    `🏠 건축 — 현재: <b>${p.icon} ${p.name}</b> (${cost}) · 좌클릭 설치 · <b>Q</b> 다음 · <b>R</b> 회전 · <b>X</b> 제거 · B 종료`;
 }
 function makeGhost() {
   ghost = new THREE.Mesh(new THREE.BoxGeometry(G, G, G),
-    new THREE.MeshBasicMaterial({ color: 0x66ff88, transparent: true, opacity: 0.35, depthWrite: false }));
+    new THREE.MeshBasicMaterial({ color: 0x66ff88, transparent: true, opacity: 0.28, depthWrite: false }));
   ghost.add(new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(G, G, G)),
     new THREE.LineBasicMaterial({ color: 0x183 })));
   ghost.visible = false; scene.add(ghost);
@@ -804,43 +824,108 @@ function makeGhost() {
 function buildTarget() {
   raycaster.setFromCamera(_center, camera);
   const meshes = [terrainMesh]; for (const b of blocks) meshes.push(b.mesh);
-  const hits = raycaster.intersectObjects(meshes, false);
-  if (!hits.length || hits[0].distance > 9) return null;
+  const hits = raycaster.intersectObjects(meshes, true);
+  if (!hits.length || hits[0].distance > 14) return null;
   const h = hits[0];
   if (h.object === terrainMesh) {
     const gx = Math.round(h.point.x / G) * G, gz = Math.round(h.point.z / G) * G;
     const gy = Math.round((heightAt(gx, gz) + G / 2) / G) * G;
     return new THREE.Vector3(gx, gy, gz);
   }
-  const b = blocks.find(bb => bb.mesh === h.object); if (!b) return null;
+  // 설치물 면을 보고 그 옆 칸에 배치
+  let obj = h.object; while (obj.parent && !blocks.find(b => b.mesh === obj)) obj = obj.parent;
+  const b = blocks.find(bb => bb.mesh === obj); if (!b) return null;
   const n = h.face.normal.clone().transformDirection(h.object.matrixWorld);
   n.x = Math.abs(n.x) > 0.5 ? Math.sign(n.x) : 0;
   n.y = Math.abs(n.y) > 0.5 ? Math.sign(n.y) : 0;
   n.z = Math.abs(n.z) > 0.5 ? Math.sign(n.z) : 0;
   return new THREE.Vector3(b.x + n.x * G, b.y + n.y * G, b.z + n.z * G);
 }
+/* 구조물/가구 프리팹 생성 — 셀 중심(0,0,0) 기준 + 충돌 정보 */
+const MAT = {
+  wood: new THREE.MeshStandardMaterial({ color: 0x9a6b35, roughness: 0.92 }),
+  dark: new THREE.MeshStandardMaterial({ color: 0x6b4a25, roughness: 0.95 }),
+  stone: new THREE.MeshStandardMaterial({ color: 0x8a8a8a, roughness: 0.85, metalness: 0.05 }),
+  fabric: new THREE.MeshStandardMaterial({ color: 0xb33b3b, roughness: 1 }),
+  glass: new THREE.MeshStandardMaterial({ color: 0xaad4e6, transparent: true, opacity: 0.35, roughness: 0.1, metalness: 0.2 }),
+};
+function box(w, h, d, m, x, y, z) { const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); o.position.set(x || 0, y || 0, z || 0); o.castShadow = true; o.receiveShadow = true; return o; }
+function makePiece(id) {
+  const g = new THREE.Group(); const H = G / 2; let col, light = false;
+  if (id === "floor") {
+    g.add(box(G, 0.2, G, MAT.wood, 0, -H + 0.1, 0));
+    col = { solid: false, stand: true, hw: G / 2, hd: G / 2, topY: -H + 0.2, botY: -H };
+  } else if (id === "wall" || id === "stonewall") {
+    const m = id === "stonewall" ? MAT.stone : MAT.wood;
+    g.add(box(G, G, 0.25, m, 0, 0, 0));
+    col = { solid: true, stand: true, hw: G / 2, hd: 0.15, topY: H, botY: -H };
+  } else if (id === "window") {
+    g.add(box(G, 0.5, 0.25, MAT.wood, 0, H - 0.25, 0));
+    g.add(box(G, 0.6, 0.25, MAT.wood, 0, -H + 0.3, 0));
+    g.add(box(0.3, G, 0.25, MAT.wood, -G / 2 + 0.15, 0, 0));
+    g.add(box(0.3, G, 0.25, MAT.wood, G / 2 - 0.15, 0, 0));
+    g.add(box(G - 0.6, G - 1.1, 0.08, MAT.glass, 0, 0, 0));
+    col = { solid: true, stand: true, hw: G / 2, hd: 0.15, topY: H, botY: -H };
+  } else if (id === "door") {
+    g.add(box(0.3, G, 0.25, MAT.wood, -G / 2 + 0.15, 0, 0));
+    g.add(box(0.3, G, 0.25, MAT.wood, G / 2 - 0.15, 0, 0));
+    g.add(box(G, 0.4, 0.25, MAT.wood, 0, H - 0.2, 0));
+    g.add(box(G - 0.9, G - 0.5, 0.08, MAT.dark, 0, -0.25, 0)); // 문짝(통과 가능)
+    col = { solid: false, stand: false, hw: G / 2, hd: 0.15, topY: H, botY: -H };
+  } else if (id === "roof") {
+    g.add(box(G + 0.2, 0.22, G + 0.2, MAT.dark, 0, H - 0.1, 0));
+    col = { solid: false, stand: true, hw: G / 2, hd: G / 2, topY: H, botY: H - 0.22 };
+  } else if (id === "table") {
+    g.add(box(1.6, 0.15, 1.0, MAT.wood, 0, -H + 1.0, 0));
+    [[-0.7, -0.4], [0.7, -0.4], [-0.7, 0.4], [0.7, 0.4]].forEach(([lx, lz]) => g.add(box(0.12, 1.0, 0.12, MAT.dark, lx, -H + 0.5, lz)));
+    col = { solid: true, stand: true, hw: 0.85, hd: 0.55, topY: -H + 1.1, botY: -H };
+  } else if (id === "chair") {
+    g.add(box(0.6, 0.12, 0.6, MAT.wood, 0, -H + 0.55, 0));
+    g.add(box(0.6, 0.6, 0.12, MAT.wood, 0, -H + 0.9, -0.24));
+    col = { solid: true, stand: true, hw: 0.35, hd: 0.35, topY: -H + 0.6, botY: -H };
+  } else if (id === "bed") {
+    g.add(box(1.2, 0.4, 2.2, MAT.wood, 0, -H + 0.3, 0));
+    g.add(box(1.16, 0.2, 2.0, MAT.fabric, 0, -H + 0.55, 0));
+    g.add(box(1.0, 0.3, 0.4, MAT.fabric, 0, -H + 0.7, -0.8));
+    col = { solid: true, stand: true, hw: 0.65, hd: 1.1, topY: -H + 0.65, botY: -H };
+  } else if (id === "crate") {
+    g.add(box(1.2, 1.2, 1.2, MAT.wood, 0, -H + 0.6, 0));
+    col = { solid: true, stand: true, hw: 0.6, hd: 0.6, topY: -H + 1.2, botY: -H };
+  } else if (id === "torch") {
+    g.add(box(0.12, 1.4, 0.12, MAT.dark, 0, -H + 0.7, 0));
+    const flame = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.5, 6), new THREE.MeshBasicMaterial({ color: 0xff9933 }));
+    flame.position.y = -H + 1.55; g.add(flame);
+    const pl = new THREE.PointLight(0xff9a3c, 2.2, 18); pl.position.y = -H + 1.6; g.add(pl);
+    col = { solid: false, stand: false, hw: 0.1, hd: 0.1, topY: -H, botY: -H }; light = true;
+  } else {
+    g.add(box(G, G, G, MAT.wood)); col = { solid: true, stand: true, hw: G / 2, hd: G / 2, topY: H, botY: -H };
+  }
+  return { mesh: g, col, light };
+}
 function placeBlock() {
+  const piece = PIECES[buildIdx];
   const t = buildTarget();
   if (!t) { toast("설치할 곳을 바라보세요"); return; }
-  if (blocks.some(b => b.x === t.x && b.y === t.y && b.z === t.z)) return;
-  const cost = buildMat === "wood" ? { wood: 2 } : { stone: 3 };
-  if (!canAfford(cost)) { toast(`재료 부족! (${buildMat === "wood" ? "🪵2" : "🪨3"})`); return; }
-  for (const k in cost) P.inv[k] -= cost[k];
-  const mat = buildMat === "wood"
-    ? new THREE.MeshStandardMaterial({ color: 0x9a6b35, roughness: 0.92 })
-    : new THREE.MeshStandardMaterial({ color: 0x8a8a8a, roughness: 0.85, metalness: 0.04 });
-  const m = new THREE.Mesh(new THREE.BoxGeometry(G, G, G), mat);
-  m.position.copy(t); m.castShadow = true; m.receiveShadow = true; scene.add(m);
-  blocks.push({ mesh: m, x: t.x, y: t.y, z: t.z, type: buildMat });
+  if (blocks.some(b => b.x === t.x && b.y === t.y && b.z === t.z)) { toast("이미 있어요"); return; }
+  if (!canAfford(piece.cost)) { toast("재료 부족! " + Object.entries(piece.cost).map(([k, v]) => ICON[k] + v).join(" ")); return; }
+  for (const k in piece.cost) P.inv[k] -= piece.cost[k];
+  const { mesh, col, light } = makePiece(piece.id);
+  mesh.position.copy(t); mesh.rotation.y = buildYaw; scene.add(mesh);
+  // 회전(90/270도)이면 가로/세로 충돌 폭 교환
+  const horiz = Math.abs(Math.round(buildYaw / (Math.PI / 2))) % 2 === 1;
+  const hw = horiz ? col.hd : col.hw, hd = horiz ? col.hw : col.hd;
+  blocks.push({ mesh, x: t.x, y: t.y, z: t.z, hw, hd, topY: t.y + col.topY, botY: t.y + col.botY, solid: col.solid, stand: col.stand, mainMat: Object.keys(piece.cost)[0] });
+  if (light) campfires.push({ x: t.x, z: t.z }); // 횃불은 모닥불처럼 체온 유지
 }
 function removeBlock() {
   raycaster.setFromCamera(_center, camera);
   const meshes = blocks.map(b => b.mesh);
-  const hits = raycaster.intersectObjects(meshes, false);
-  if (!hits.length || hits[0].distance > 9) return;
-  const b = blocks.find(bb => bb.mesh === hits[0].object); if (!b) return;
+  const hits = raycaster.intersectObjects(meshes, true);
+  if (!hits.length || hits[0].distance > 12) return;
+  let obj = hits[0].object; while (obj.parent && !blocks.find(b => b.mesh === obj)) obj = obj.parent;
+  const b = blocks.find(bb => bb.mesh === obj); if (!b) return;
   scene.remove(b.mesh); blocks = blocks.filter(x => x !== b);
-  addItem(b.type, 1); // 일부 환급
+  if (b.mainMat) addItem(b.mainMat, 1);
 }
 function updateBuild() {
   if (!buildMode || !ghost) { if (ghost) ghost.visible = false; return; }
@@ -1043,7 +1128,7 @@ function harvest(r) {
 }
 function respawnResource(type) {
   let x, z, y, t = 0;
-  do { x = (Math.random() - .5) * 640; z = (Math.random() - .5) * 640; y = heightAt(x, z); t++; } while (y < SEA + 2 && t < 30);
+  do { x = (Math.random() - .5) * (MAP * 0.95); z = (Math.random() - .5) * (MAP * 0.95); y = heightAt(x, z); t++; } while (y < SEA + 2 && t < 30);
   const mk = type === "tree" ? makeTree : type === "rock" ? makeRock : makeBush;
   const m = mk(); m.position.set(x, y, z); m.traverse(o => { if (o.isMesh) o.castShadow = true; });
   scene.add(m); resources.push({ mesh: m, type, x, z, y, hp: type === "rock" ? 5 : type === "tree" ? 4 : 2, rad: type === "rock" ? 1.1 : type === "tree" ? 0.6 : 0 });
@@ -1642,6 +1727,6 @@ function parseGLB(buffer) {
   bind("tCraft", () => toggleCraft());
   bind("tReload", () => startReload());
   bind("tBuild", () => toggleBuild());
-  bind("tMat", () => { if (buildMode) toggleBuildMat(); else toast("건축 버튼을 먼저 누르세요"); });
+  bind("tMat", () => { if (buildMode) cyclePiece(1); else toast("건축 버튼을 먼저 누르세요"); });
   bind("tEat", () => eatFood());
 })();
