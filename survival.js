@@ -139,6 +139,7 @@ let crops = [];       // 농작물 {mesh,x,z,plantedAt,grown}
 let fishing = { active: false, state: "idle", biteAt: 0, biteEnd: 0 }; // 낚시 상태
 const GROW_MS = 75000; // 작물 성장 시간
 let wasNight = false;
+let creative = false, flying = false, lastSpace = 0; // 크리에이티브 모드
 let others = {};      // 다른 플레이어 {id:{group,nameSprite,hp,target,...}}
 let projectiles = [];
 let state = "loading";
@@ -235,6 +236,9 @@ function startGame() {
     onState: onPeerState, onLeave: onPeerLeave, onHit: onPeerHit, onChat: onPeerChat,
   });
   document.getElementById("netBadge").textContent = Net.online() ? "🟢 온라인" : "⚪ 혼자 모드";
+
+  const chk = document.getElementById("creativeChk");
+  if (chk && chk.checked) setCreative(true);
 
   state = "playing";
   if (!isMobile) renderer.domElement.requestPointerLock();
@@ -662,8 +666,16 @@ function bindInput() {
     if (e.code === "KeyX" && buildMode) removeBlock();
     if (e.code === "KeyR") { if (buildMode) rotatePiece(); else startReload(); }
     if (e.code === "KeyH") eatFood();
+    if (e.code === "KeyK") setCreative(!creative);
     if (e.code === "KeyF") interact();
-    if (e.code === "Space") { if (P.onGround) { P.vel.y = 8.5; P.onGround = false; } }
+    if (e.code === "Space") {
+      if (creative && !e.repeat) {
+        const now = performance.now();
+        if (now - lastSpace < 300) { flying = !flying; P.vel.y = 0; toast(flying ? "✈️ 비행 ON (Space↑ Ctrl↓)" : "비행 OFF"); }
+        lastSpace = now;
+      }
+      if (!flying && P.onGround) { P.vel.y = 8.5; P.onGround = false; }
+    }
     if (/^Digit[1-9]$/.test(e.code)) selectSlot(parseInt(e.code.slice(5)) - 1);
     if (e.code === "Enter") openChat();
   });
@@ -715,12 +727,14 @@ function animate() {
 function updatePlayer(dt) {
   if (!P.alive) return;
   let mx = 0, mz = 0;
+  if (creative) { for (const k of MATS) if ((P.inv[k] || 0) < 900) P.inv[k] = 999; } // 무한 자원
   if (keys["KeyW"]) mz += 1; if (keys["KeyS"]) mz -= 1;
   if (keys["KeyA"]) mx -= 1; if (keys["KeyD"]) mx += 1;
-  const run = (keys["ShiftLeft"] || keys["ShiftRight"]) && P.stamina > 1 && (mx || mz);
-  const base = keys["ControlLeft"] ? 2.5 : (run ? 8.5 : 5);
-  if (run) P.stamina = Math.max(0, P.stamina - dt * 12);
-  else P.stamina = Math.min(100, P.stamina + dt * 8);
+  const fly = creative && flying;
+  const run = (keys["ShiftLeft"] || keys["ShiftRight"]) && (fly || P.stamina > 1) && (mx || mz);
+  const base = (fly ? (run ? 22 : 12) : (keys["ControlLeft"] && !fly ? 2.5 : (run ? 8.5 : 5)));
+  if (run && !fly) P.stamina = Math.max(0, P.stamina - dt * 12);
+  else if (!fly) P.stamina = Math.min(100, P.stamina + dt * 8);
 
   const fwd = new THREE.Vector3(Math.sin(P.yaw), 0, Math.cos(P.yaw));
   const right = new THREE.Vector3(-Math.cos(P.yaw), 0, Math.sin(P.yaw)); // A=왼쪽 / D=오른쪽
@@ -729,7 +743,13 @@ function updatePlayer(dt) {
   if (move.length() > 0) move.normalize();
   P.vel.x = move.x * base; P.vel.z = move.z * base;
 
-  P.vel.y -= 22 * dt; // 중력
+  if (fly) {
+    // 비행: 중력 없음, Space=상승 Ctrl=하강
+    const up = (keys["Space"] ? 1 : 0) - ((keys["ControlLeft"] || keys["ControlRight"]) ? 1 : 0);
+    P.vel.y = up * 12;
+  } else {
+    P.vel.y -= 22 * dt; // 중력
+  }
 
   // 수평 충돌 (나무·돌·동물·블록 통과 금지, 벽 따라 미끄러짐)
   const nx = P.pos.x + P.vel.x * dt, nz = P.pos.z + P.vel.z * dt;
@@ -739,7 +759,7 @@ function updatePlayer(dt) {
 
   // 수직 충돌 (지형 + 블록 위에 서기, 눈높이 1.8)
   const ground = supportHeight(P.pos.x, P.pos.z) + 1.8;
-  if (P.pos.y <= ground) { P.pos.y = ground; P.vel.y = 0; P.onGround = true; }
+  if (P.pos.y <= ground) { P.pos.y = ground; if (!fly) P.vel.y = 0; P.onGround = true; }
   else P.onGround = false;
 
   const lim = MAPR - 12;
@@ -936,6 +956,7 @@ function updateBuild() {
 /* ---------------- 생존 스탯 ---------------- */
 function updateSurvival(dt) {
   if (!P.alive) return;
+  if (creative) { P.hunger = P.thirst = P.stamina = 100; P.hp = 100; return; }
   P.hunger = Math.max(0, P.hunger - dt * 0.55);
   P.thirst = Math.max(0, P.thirst - dt * 0.8);
   // 밤에는 체온 하락, 모닥불/낮엔 회복
@@ -1326,7 +1347,17 @@ function toggleCraft() {
 }
 document.getElementById("craftClose").onclick = toggleCraft;
 
-function canAfford(c) { for (const k in c) if ((P.inv[k] || 0) < c[k]) return false; return true; }
+function canAfford(c) { if (creative) return true; for (const k in c) if ((P.inv[k] || 0) < c[k]) return false; return true; }
+function setCreative(on) {
+  creative = on; flying = false;
+  const b = document.getElementById("creativeBadge"); if (b) b.classList.toggle("hidden", !on);
+  if (on) {
+    P.age = AGES.length - 1;
+    for (const k of MATS) P.inv[k] = 999;
+    P.hp = P.hunger = P.thirst = P.stamina = 100;
+    toast("🛠️ 크리에이티브 모드 (무한자원·무적·비행)");
+  } else { flying = false; toast("🌿 생존 모드"); }
+}
 
 const ICON = { wood: "🪵", stone: "🪨", fiber: "🌿", iron: "🔩", gunpowder: "💥", food: "🍖", fish: "🐟", crop: "🥕", cooked: "🍗", seed: "🌱" };
 const MATS = ["wood", "stone", "fiber", "iron", "gunpowder", "seed", "food", "fish", "crop", "cooked"];
@@ -1575,7 +1606,7 @@ function updateCamera() {
    데미지 / 죽음 / 부활
    ============================================================ */
 function damageSelf(amt, by) {
-  if (!P.alive) return;
+  if (!P.alive || creative) return; // 크리에이티브=무적
   P.hp -= amt * (1 - P.armor);
   if (amt > 0.5) {
     const v = document.getElementById("dmg"); v.style.opacity = "1"; setTimeout(() => v.style.opacity = "0", 150);

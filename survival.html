@@ -62,6 +62,7 @@
   #toast.show{opacity:1;}
   #buildBadge{position:absolute;top:46px;left:50%;transform:translateX(-50%);background:rgba(11,40,16,.85);border:1px solid var(--green);border-radius:4px;padding:6px 14px;font-size:13px;color:#cfe8b8;}
   #buildBadge b{color:#aef07c;}
+  #creativeBadge{position:absolute;top:80px;left:50%;transform:translateX(-50%);background:rgba(40,30,8,.85);border:1px solid var(--acc);border-radius:4px;padding:5px 12px;font-size:12px;color:var(--acc2);}
   #chatLog{position:absolute;left:16px;top:90px;font-size:13px;max-width:40vw;}
   #chatLog div{background:rgba(11,14,12,.6);padding:2px 8px;margin-bottom:3px;border-left:2px solid var(--blue);display:inline-block;}
   #chatInput{position:absolute;bottom:90px;left:50%;transform:translateX(-50%);width:min(420px,80vw);padding:9px;background:rgba(11,14,12,.95);border:1px solid var(--acc);color:#fff;border-radius:4px;font-size:15px;pointer-events:auto;outline:none;}
@@ -131,6 +132,9 @@
   <div class="panel">
     <div class="field"><label>닉네임</label><input id="nick" type="text" maxlength="12" placeholder="생존자 이름"></div>
     <div class="field"><label>나라 선택</label><div id="countryGrid"></div></div>
+    <label style="display:flex;align-items:center;gap:8px;margin-bottom:12px;cursor:pointer;color:var(--acc2);font-size:14px;">
+      <input id="creativeChk" type="checkbox" style="width:18px;height:18px;accent-color:var(--acc);"> 🛠️ 크리에이티브 모드 (실험용 — 무한자원·무적·비행)
+    </label>
     <button class="btn" id="startBtn">생존 시작</button>
     <div class="keys">
       <b>이동</b> WASD · <b>달리기</b> Shift · <b>점프</b> Space · <b>웅크리기</b> Ctrl<br>
@@ -161,6 +165,7 @@
   <div id="hint"><span id="hintTxt"></span></div>
   <div id="toast"></div>
   <div id="buildBadge" class="hidden"></div>
+  <div id="creativeBadge" class="hidden">🛠️ 크리에이티브 (실험) — 더블 Space 비행 · K 끄기</div>
   <div id="chatLog"></div>
   <input id="chatInput" class="hidden" maxlength="80" placeholder="메시지 입력 후 Enter">
   <div id="hotbar"></div>
