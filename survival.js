@@ -74,6 +74,7 @@ const RECIPES = [
   { id: "stone_axe",   name: "돌도끼",   age: 0, cost: { wood: 3, stone: 2 },            dmg: 18, range: 3.2, kind: "melee", mine: 2, icon: "🪓" },
   { id: "stone_spear", name: "돌창",     age: 0, cost: { wood: 4, stone: 2, fiber: 2 },  dmg: 26, range: 4.0, kind: "melee", icon: "🗡️" },
   { id: "campfire",    name: "모닥불",   age: 0, cost: { wood: 6, stone: 4 },            kind: "build", icon: "🔥" },
+  { id: "rod",         name: "낚싯대",   age: 0, cost: { wood: 3, fiber: 3 },            dmg: 3, range: 2.5, kind: "melee", rod: true, icon: "🎣" },
   // 청동기·철기
   { id: "iron_pickaxe", name: "철곡괭이", age: 1, cost: { iron: 3, wood: 2 },            dmg: 24, range: 3.4, kind: "melee", mine: 3, icon: "⛏️" },
   { id: "iron_sword",  name: "철검",     age: 1, cost: { iron: 4, wood: 2 },             dmg: 40, range: 3.4, kind: "melee", icon: "⚔️" },
@@ -104,9 +105,9 @@ let raycaster = new THREE.Raycaster();
    게임에 자동 배치됩니다. as: "tree"(벌목가능)·"rock"(채광가능)·"prop"(장애물)
    ============================================================ */
 const CUSTOM_MODELS = [
-  // { file: "tree1", as: "tree", count: 120, scale: 1, solidRad: 0.6 },
-  // { file: "rock1", as: "rock", count: 50,  scale: 1, solidRad: 1.2 },
-  // { file: "car1",  as: "prop", count: 8,   scale: 1, solidRad: 2.4 },
+  { file: "birch", as: "tree", count: 60, scale: 1, solidRad: 0.7 },              // 자작나무 숲(벌목 가능)
+  { file: "raft",  as: "prop", count: 7,  scale: 1, solidRad: 1.6, water: true }, // 물가 뗏목
+  { file: "kayak", as: "prop", count: 7,  scale: 1, solidRad: 1.0, water: true }, // 물가 카약
 ];
 
 /* 시네마틱 컬러 그레이딩 + 비네트 + 필름 그레인 (TLOU 무드) */
@@ -134,6 +135,9 @@ let resources = [];   // 채집물 {mesh,type,hp,x,z}
 let animals = [];
 let props = [];       // 버려진 차량 등 장애물 {mesh,x,z,rad}
 let zombies = [];     // 감염체(밤 적) {mesh,x,z,hp,phase,nextHit,alive}
+let crops = [];       // 농작물 {mesh,x,z,plantedAt,grown}
+let fishing = { active: false, state: "idle", biteAt: 0, biteEnd: 0 }; // 낚시 상태
+const GROW_MS = 75000; // 작물 성장 시간
 let wasNight = false;
 let others = {};      // 다른 플레이어 {id:{group,nameSprite,hp,target,...}}
 let projectiles = [];
@@ -294,7 +298,7 @@ function setupFX() {
   try {
     composer = new THREE.EffectComposer(renderer);
     composer.addPass(new THREE.RenderPass(scene, camera));
-    composer.addPass(new THREE.UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.55, 0.5, 0.85));
+    composer.addPass(new THREE.UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.32, 0.5, 0.9));
     gradePass = new THREE.ShaderPass(GradeShader);
     composer.addPass(gradePass);
     if (THREE.FXAAShader) {
@@ -399,12 +403,13 @@ function placeCustomModels() {
   for (const cm of CUSTOM_MODELS) {
     if (!glbModels[cm.file]) { console.warn("[모델 없음]", cm.file + ".glb 를 저장소에 올렸는지 확인하세요"); continue; }
     let placed = 0, tries = 0;
-    while (placed < (cm.count || 20) && tries < (cm.count || 20) * 40) {
+    const lo = cm.water ? SEA - 2.5 : SEA + 1, hi = cm.water ? SEA + 0.6 : 34;
+    while (placed < (cm.count || 20) && tries < (cm.count || 20) * 50) {
       tries++;
       const x = (Math.random() - .5) * 640, z = (Math.random() - .5) * 640, y = heightAt(x, z);
-      if (y < SEA + 1 || y > 34) continue;
+      if (y < lo || y > hi) continue;
       const m = glbModels[cm.file].clone(true);
-      m.position.set(x, y, z); m.rotation.y = Math.random() * 6.28;
+      m.position.set(x, cm.water ? SEA : y, z); m.rotation.y = Math.random() * 6.28;
       if (cm.scale) m.scale.multiplyScalar(cm.scale);
       m.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
       scene.add(m);
@@ -457,9 +462,9 @@ function scatterResources() {
       n++;
     }
   };
-  place("tree", 240, makeTree);
+  place("tree", 150, makeTree);
   place("rock", 130, makeRock);
-  place("bush", 110, makeBush);
+  place("bush", 120, makeBush);
 }
 
 /* ---- 디테일 있는 채집물 모델 (scatter & 리스폰 공용) ---- */
@@ -639,6 +644,7 @@ function bindInput() {
     if (e.code === "KeyQ" && buildMode) toggleBuildMat();
     if (e.code === "KeyX" && buildMode) removeBlock();
     if (e.code === "KeyR") startReload();
+    if (e.code === "KeyH") eatFood();
     if (e.code === "KeyF") interact();
     if (e.code === "Space") { if (P.onGround) { P.vel.y = 8.5; P.onGround = false; } }
     if (/^Digit[1-9]$/.test(e.code)) selectSlot(parseInt(e.code.slice(5)) - 1);
@@ -672,6 +678,8 @@ function animate() {
   updateSurvival(dt);
   updateAnimals(dt);
   updateZombies(dt);
+  updateFishing(dt);
+  updateCrops();
   updateProjectiles(dt);
   updateOthers(dt);
   updateBuild();
@@ -728,10 +736,9 @@ function updatePlayer(dt) {
   }
 
   // 상호작용 힌트
-  const tgt = aimTarget();
   const hint = document.getElementById("hint");
-  if (buildMode) { hint.classList.remove("show"); }
-  else if (tgt) { hint.classList.add("show"); document.getElementById("hintTxt").innerHTML = tgt.label; }
+  const lbl = getHint();
+  if (lbl) { hint.classList.add("show"); document.getElementById("hintTxt").innerHTML = lbl; }
   else hint.classList.remove("show");
 }
 
@@ -895,11 +902,123 @@ function aimTarget() {
   return best;
 }
 
+function nearestResource() {
+  let best = null, bd = 3.6;
+  for (const r of resources) { const d = Math.hypot(P.pos.x - r.x, P.pos.z - r.z); if (d < bd) { bd = d; best = r; } }
+  return best;
+}
+function nearestCrop(grownOnly) {
+  let best = null, bd = 3;
+  for (const c of crops) { if (grownOnly && !c.grown) continue; const d = Math.hypot(P.pos.x - c.x, P.pos.z - c.z); if (d < bd) { bd = d; best = c; } }
+  return best;
+}
+
+/* F키 — 상황에 맞게: 낚시챔질 / 채집 / 수확 / 요리 / 낚시시작 / 물마시기 / 씨앗심기 */
 function interact() {
-  const t = aimTarget();
-  if (!t) return;
-  if (t.type === "water") { P.thirst = Math.min(100, P.thirst + 25); toast("물을 마셨다 💧"); return; }
-  if (t.type === "res") harvest(t.ref);
+  if (!P.alive) return;
+  const held = recipeById(P.hotbar[P.slot]);
+  const onShore = heightAt(P.pos.x, P.pos.z) < SEA + 3;
+  if (fishing.active) { reelFish(); return; }
+  const res = nearestResource(); if (res) { harvest(res); return; }
+  const crop = nearestCrop(true); if (crop) { harvestCrop(crop); return; }
+  if (nearCampfire() && (P.inv.fish > 0 || P.inv.food > 0)) { cook(); return; }
+  if (onShore && held.rod) { startFishing(); return; }
+  if (onShore) { P.thirst = Math.min(100, P.thirst + 25); toast("물을 마셨다 💧"); return; }
+  if ((P.inv.seed || 0) > 0) { plantSeed(); return; }
+  toast("여기선 할 게 없어요");
+}
+
+/* 상황별 화면 힌트 */
+function getHint() {
+  if (buildMode) return null;
+  if (fishing.active) return fishing.state === "bite" ? "<b>F / 클릭</b> ❗ 챔질!" : "🎣 낚시 중… 입질 대기";
+  const res = nearestResource();
+  if (res) {
+    if (res.type === "rock") return canMineHeld() ? "<b>F</b> 🪨 돌 캐기" : "🪨 <b>곡괭이 필요</b> (E 제작)";
+    return `<b>F</b> ${res.type === "tree" ? "🌳 나무 베기" : "🌿 채집"}`;
+  }
+  const crop = nearestCrop(false); if (crop) return crop.grown ? "<b>F</b> 🥕 수확" : "🌱 자라는 중…";
+  const held = recipeById(P.hotbar[P.slot]);
+  const onShore = heightAt(P.pos.x, P.pos.z) < SEA + 3;
+  if (nearCampfire() && (P.inv.fish > 0 || P.inv.food > 0)) return "<b>F</b> 🍳 요리하기";
+  if (onShore && held.rod) return "<b>F</b> 🎣 낚시하기";
+  if (onShore) return "<b>F</b> 💧 물 마시기";
+  if ((P.inv.seed || 0) > 0) return "<b>F</b> 🌱 씨앗 심기";
+  return null;
+}
+
+/* ---------------- 낚시 ---------------- */
+function startFishing() {
+  fishing.active = true; fishing.state = "casting";
+  fishing.biteAt = performance.now() + 2000 + Math.random() * 4000;
+  toast("🎣 낚싯줄을 던졌다… 입질을 기다려요");
+}
+function updateFishing(dt) {
+  if (!fishing.active) return;
+  if (keys["KeyW"] || keys["KeyA"] || keys["KeyS"] || keys["KeyD"]) { fishing.active = false; fishing.state = "idle"; toast("낚시 취소"); return; }
+  const now = performance.now();
+  if (fishing.state === "casting" && now >= fishing.biteAt) {
+    fishing.state = "bite"; fishing.biteEnd = now + 1500; toast("❗ 입질! 지금 F (또는 클릭)!");
+  } else if (fishing.state === "bite" && now > fishing.biteEnd) {
+    fishing.active = false; fishing.state = "idle"; toast("물고기를 놓쳤다…");
+  }
+}
+function reelFish() {
+  if (fishing.state === "bite") {
+    const n = 1 + (Math.random() < 0.3 ? 1 : 0);
+    addItem("fish", n); toast(`🐟 물고기 ${n}마리 잡았다!`);
+  } else toast("아직 입질 전… (취소)");
+  fishing.active = false; fishing.state = "idle";
+}
+
+/* ---------------- 농사 ---------------- */
+function plantSeed() {
+  if ((P.inv.seed || 0) <= 0) { toast("씨앗이 없어요 (덤불 채집 🌿)"); return; }
+  if (heightAt(P.pos.x, P.pos.z) < SEA + 1.5) { toast("물가엔 못 심어요"); return; }
+  P.inv.seed--;
+  const x = P.pos.x + Math.sin(P.yaw) * 1.6, z = P.pos.z + Math.cos(P.yaw) * 1.6, y = heightAt(x, z);
+  const g = new THREE.Group();
+  const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 0.4, 5), new THREE.MeshStandardMaterial({ color: 0x4a8b3a }));
+  stem.position.y = 0.2; g.add(stem);
+  g.position.set(x, y, z); g.scale.setScalar(0.4); scene.add(g);
+  crops.push({ mesh: g, x, z, plantedAt: performance.now(), grown: false });
+  toast("🌱 씨앗을 심었다");
+}
+function updateCrops() {
+  const now = performance.now();
+  for (const c of crops) {
+    if (c.grown) continue;
+    const t = Math.min(1, (now - c.plantedAt) / GROW_MS);
+    c.mesh.scale.setScalar(0.4 + t * 0.9);
+    if (t >= 1 && !c.grown) {
+      c.grown = true;
+      const fruit = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 8), new THREE.MeshStandardMaterial({ color: 0xe0701f, roughness: 0.8 }));
+      fruit.position.y = 0.5; c.mesh.add(fruit);
+    }
+  }
+}
+function harvestCrop(c) {
+  if (!c.grown) { toast("아직 안 자랐어요 🌱"); return; }
+  scene.remove(c.mesh); crops = crops.filter(x => x !== c);
+  addItem("crop", 2); if (Math.random() < 0.7) addItem("seed", 1);
+  toast("🥕 작물 수확! (+씨앗)");
+}
+
+/* ---------------- 요리 / 먹기 ---------------- */
+function cook() {
+  if (P.inv.fish > 0) { P.inv.fish--; addItem("cooked", 1); toast("🍳 생선 구이 완성 🍗"); }
+  else if (P.inv.food > 0) { P.inv.food--; addItem("cooked", 1); toast("🍳 고기 구이 완성 🍗"); }
+  else toast("구울 날음식이 없어요");
+}
+function eatFood() {
+  let r = 0, label = "";
+  if (P.inv.cooked > 0) { P.inv.cooked--; r = 45; label = "구이"; }
+  else if (P.inv.crop > 0) { P.inv.crop--; r = 25; label = "채소"; }
+  else if (P.inv.fish > 0) { P.inv.fish--; r = 14; label = "날생선"; }
+  else if (P.inv.food > 0) { P.inv.food--; r = 14; label = "날고기"; }
+  else { toast("먹을 게 없어요 🍽️"); return; }
+  P.hunger = Math.min(100, P.hunger + r); P.hp = Math.min(100, P.hp + r * 0.2);
+  toast(`${label} 먹음 (+${r} 허기) 🍴`);
 }
 
 let mineWarnAt = 0;
@@ -918,7 +1037,7 @@ function harvest(r) {
     addItem("stone", 3);
     if (Math.random() < 0.5) addItem("iron", 1);
     if (Math.random() < 0.25) addItem("gunpowder", 1);
-  } else { addItem("fiber", 2); addItem("food", 1); }
+  } else { addItem("fiber", 2); if (Math.random() < 0.7) addItem("food", 1); if (Math.random() < 0.6) addItem("seed", 1); }
   // 자원 리스폰(시간차)
   setTimeout(() => respawnResource(r.type), 25000);
 }
@@ -935,6 +1054,7 @@ function addItem(k, n) { P.inv[k] = (P.inv[k] || 0) + n; }
 /* ---------------- 공격 / 사격 ---------------- */
 function primaryAction() {
   if (!P.alive) return;
+  if (fishing.active) { reelFish(); return; }
   if (buildMode) { placeBlock(); return; }
   const w = recipeById(P.hotbar[P.slot]);
   if (performance.now() < P.nextAct) return;
@@ -1123,8 +1243,8 @@ document.getElementById("craftClose").onclick = toggleCraft;
 
 function canAfford(c) { for (const k in c) if ((P.inv[k] || 0) < c[k]) return false; return true; }
 
-const ICON = { wood: "🪵", stone: "🪨", fiber: "🌿", iron: "🔩", gunpowder: "💥", food: "🍖" };
-const MATS = ["wood", "stone", "fiber", "iron", "gunpowder", "food"];
+const ICON = { wood: "🪵", stone: "🪨", fiber: "🌿", iron: "🔩", gunpowder: "💥", food: "🍖", fish: "🐟", crop: "🥕", cooked: "🍗", seed: "🌱" };
+const MATS = ["wood", "stone", "fiber", "iron", "gunpowder", "seed", "food", "fish", "crop", "cooked"];
 
 function renderCraft() {
   document.getElementById("ageLabel").textContent = `시대: ${AGES[P.age]}`;
@@ -1231,16 +1351,46 @@ function selectSlot(i) {
   P.slot = i; P.reloading = false; rebuildHotbar();
 }
 
+const SKIN = new THREE.MeshStandardMaterial({ color: 0xe0ad7a, roughness: 0.8 });
+/* 1인칭 손/주먹 한 개 (x: 화면 좌우 위치) */
+function makeHand(x) {
+  const g = new THREE.Group();
+  const fist = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.17, 0.19), SKIN); g.add(fist);
+  const arm = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.13, 0.34), SKIN);
+  arm.position.set(0, -0.02, 0.22); g.add(arm);
+  g.position.set(x, -0.34, -0.55); g.rotation.x = 0.25;
+  return g;
+}
+/* 모델 없는 도구를 손에 든 간단한 형상 */
+function makeToolMesh(r) {
+  const g = new THREE.Group();
+  const wood = new THREE.MeshStandardMaterial({ color: 0x6b4a2b, roughness: 1 });
+  const metal = new THREE.MeshStandardMaterial({ color: 0xc2c7cb, metalness: 0.6, roughness: 0.35 });
+  const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.03, 0.55, 6), wood);
+  handle.rotation.x = 1.3; g.add(handle);
+  if (/axe|pick/.test(r.id)) { const h = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.1, 0.04), metal); h.position.set(0, 0.0, -0.26); g.add(h); }
+  else if (/sword|spear|knife/.test(r.id)) { const h = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.5, 0.02), metal); h.rotation.x = 1.3; h.position.set(0, 0, -0.5); g.add(h); }
+  else if (r.rod) { const h = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.7, 4), wood); h.rotation.x = 1.0; h.position.set(0, 0.05, -0.45); g.add(h); }
+  else if (r.kind === "build") { const h = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.18, 0.18), wood); h.position.set(0, 0.0, -0.32); g.add(h); }
+  g.position.set(0.3, -0.32, -0.5); g.rotation.set(0.1, 0, -0.15);
+  return g;
+}
 function equipHeld() {
   if (P.heldModel) { camera.remove(P.heldModel); P.heldModel = null; }
   const r = recipeById(P.hotbar[P.slot]);
-  if (r && r.model && glbModels[r.model]) {
+  const grp = new THREE.Group();
+  if (!r || r.id === "fist") {
+    grp.add(makeHand(-0.34)); grp.add(makeHand(0.34)); // 양손 주먹
+  } else if (r.model && glbModels[r.model]) {
+    grp.add(makeHand(0.36));                           // 오른손
     const m = glbModels[r.model].clone(true);
-    m.scale.multiplyScalar(0.85);
-    m.position.set(0.32, -0.28, -0.6);
-    m.rotation.y = Math.PI;
-    camera.add(m); P.heldModel = m;
+    m.scale.multiplyScalar(0.85); m.position.set(0.18, -0.3, -0.55); m.rotation.y = Math.PI;
+    grp.add(m);
+  } else {
+    grp.add(makeHand(0.34)); grp.add(makeToolMesh(r));  // 오른손 + 도구
   }
+  grp.traverse(o => { if (o.isMesh) o.renderOrder = 999; });
+  camera.add(grp); P.heldModel = grp;
   if (!scene.children.includes(camera)) scene.add(camera);
 }
 
@@ -1305,9 +1455,9 @@ function updateDayNight(dt) {
   sun.position.set(sx * 200 + P.pos.x, sy * 200, sz * 200 + P.pos.z);
   sun.target.position.copy(P.pos);
   const day = Math.max(0, sy);
-  sun.intensity = 0.15 + day * 2.4;
-  sun.color.setHSL(0.09, 0.6, 0.5 + 0.45 * Math.min(1, day * 2)); // 일출/일몰 붉은빛
-  hemi.intensity = 0.2 + day * 0.6;
+  sun.intensity = day * 2.0;                                    // 밤=0 (해 짐)
+  sun.color.setHSL(0.08, 0.65, 0.45 + 0.35 * Math.min(1, day * 2)); // 일출/일몰 붉은빛
+  hemi.intensity = 0.08 + day * 0.5;                            // 밤엔 아주 어둑
 
   if (skyMode === "sky") {
     const sunDir = new THREE.Vector3(sx, sy, sz).normalize();
@@ -1320,7 +1470,7 @@ function updateDayNight(dt) {
     sky.material.uniforms.bot.value.copy(sky2);
     scene.fog.color.copy(sky2);
   }
-  renderer.toneMappingExposure = 0.5 + day * 0.65;
+  renderer.toneMappingExposure = 0.16 + day * 0.5; // 밤=어둡게, 낮=눈 안아프게
 
   // 물결 애니메이션
   if (waterN) { waterN.offset.x = (waterN.offset.x + dt * 0.03) % 1; waterN.offset.y = (waterN.offset.y + dt * 0.02) % 1; }
@@ -1493,4 +1643,5 @@ function parseGLB(buffer) {
   bind("tReload", () => startReload());
   bind("tBuild", () => toggleBuild());
   bind("tMat", () => { if (buildMode) toggleBuildMat(); else toast("건축 버튼을 먼저 누르세요"); });
+  bind("tEat", () => eatFood());
 })();
