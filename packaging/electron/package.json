@@ -1,0 +1,23 @@
+{
+  "name": "battleplace-survival",
+  "version": "1.0.0",
+  "description": "배틀플레이스: 생존 — 데스크톱(.exe) 빌드",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win"
+  },
+  "build": {
+    "appId": "com.battleplace.survival",
+    "productName": "BattlePlace Survival",
+    "files": ["main.js"],
+    "extraResources": [
+      { "from": "../../", "to": "app", "filter": ["**/*.html", "**/*.js", "**/*.glb"] }
+    ],
+    "win": { "target": "nsis" }
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  }
+}

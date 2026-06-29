@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>배틀플레이스: 생존 (Battle Place: Survival)</title>
+<link href="https://fonts.googleapis.com/css2?family=Teko:wght@500;600;700&family=Oswald:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{ --bg:#0b0e0c; --panel:rgba(16,20,16,.92); --line:#3a4034; --acc:#f2a900; --acc2:#ffce5c;
+    --red:#e7402e; --green:#7cc043; --blue:#4da6ff; --txt:#eef0e8; --dim:#9aa08c; }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);font-family:'Oswald',sans-serif;color:var(--txt);user-select:none;}
+  canvas{display:block;} .hidden{display:none!important;}
+
+  /* 로딩 */
+  #loading{position:fixed;inset:0;z-index:90;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0b0e0c;}
+  .load-title{font-family:'Teko';font-size:62px;letter-spacing:3px;color:var(--acc);}
+  .load-bar-bg{margin-top:18px;width:min(360px,80vw);height:10px;background:#1c211a;border:1px solid var(--line);border-radius:6px;overflow:hidden;}
+  .load-bar{height:100%;width:0%;background:linear-gradient(90deg,var(--acc),var(--acc2));transition:width .25s;}
+  .load-txt{margin-top:12px;font-size:14px;color:var(--dim);letter-spacing:1px;}
+
+  /* 시작 */
+  .overlay{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;flex-direction:column;
+    background:linear-gradient(160deg,#10140e,#0b0e0c 60%);overflow:auto;padding:20px;}
+  .brand{font-family:'Teko';font-size:clamp(48px,10vw,96px);line-height:.85;letter-spacing:3px;text-align:center;}
+  .brand span{color:var(--acc);}
+  .brand-sub{font-size:clamp(12px,2.2vw,16px);letter-spacing:8px;color:var(--dim);margin-top:2px;text-transform:uppercase;}
+  .panel{margin-top:24px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:22px 26px;width:min(560px,92vw);box-shadow:0 24px 70px rgba(0,0,0,.7);}
+  .field{margin-bottom:14px;} .field label{display:block;font-size:12px;color:var(--dim);letter-spacing:2px;text-transform:uppercase;margin-bottom:6px;}
+  .field input{width:100%;background:#0c100b;border:1px solid var(--line);color:var(--txt);padding:11px;border-radius:4px;font-family:'Oswald';font-size:16px;outline:none;}
+  .field input:focus{border-color:var(--acc);}
+  #countryGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
+  .country{background:#0c100b;border:1px solid var(--line);border-radius:6px;padding:8px 4px;text-align:center;cursor:pointer;transition:.12s;}
+  .country:hover{border-color:var(--acc2);} .country.sel{border-color:var(--acc);background:rgba(242,169,0,.14);}
+  .country .flag{font-size:26px;display:block;} .country .cn{font-size:12px;color:var(--dim);}
+  .btn{width:100%;margin-top:16px;padding:15px;border:none;border-radius:4px;cursor:pointer;font-family:'Teko';font-size:26px;letter-spacing:3px;text-transform:uppercase;
+    background:linear-gradient(180deg,var(--acc),#cf8e00);color:#1a1200;box-shadow:0 5px 0 #8f6200;transition:transform .08s,box-shadow .12s;}
+  .btn:active{transform:translateY(5px);box-shadow:0 0 0 #8f6200;}
+  .keys{margin-top:14px;font-size:13px;color:var(--dim);line-height:1.7;} .keys b{color:var(--acc2);}
+  .note{margin-top:10px;font-size:12px;color:var(--dim);line-height:1.6;border-top:1px solid var(--line);padding-top:10px;}
+
+  /* HUD */
+  #hud{position:fixed;inset:0;z-index:30;pointer-events:none;}
+  #cross{position:absolute;top:50%;left:50%;width:6px;height:6px;margin:-3px 0 0 -3px;border:2px solid rgba(255,255,255,.85);border-radius:50%;}
+  #topbar{position:absolute;top:10px;left:50%;transform:translateX(-50%);display:flex;gap:14px;background:rgba(11,14,12,.7);border:1px solid var(--line);border-radius:4px;padding:6px 16px;font-size:14px;align-items:center;}
+  #topbar span{color:var(--acc2);} #netBadge{color:var(--green)!important;}
+  #stats{position:absolute;left:16px;bottom:90px;width:min(260px,46vw);display:flex;flex-direction:column;gap:5px;}
+  .statrow{display:flex;align-items:center;gap:7px;font-size:12px;}
+  .statrow .ic{width:18px;text-align:center;} .barbg{flex:1;height:11px;background:#1c211a;border:1px solid var(--line);border-radius:3px;overflow:hidden;}
+  .bar{height:100%;width:100%;transition:.2s;} #barHp{background:linear-gradient(90deg,#e7402e,#7cc043);}
+  #barHunger{background:#d48b3b;} #barThirst{background:#4da6ff;} #barStamina{background:#ffce5c;}
+  #ageBox{position:absolute;right:16px;top:54px;text-align:right;font-size:14px;background:rgba(11,14,12,.6);border:1px solid var(--line);border-radius:4px;padding:6px 12px;}
+  #ageBox b{color:var(--acc);font-family:'Teko';font-size:20px;}
+  #ammoBox{position:absolute;right:16px;bottom:90px;text-align:right;font-family:'Teko';font-size:34px;color:var(--txt);}
+  #hotbar{position:absolute;bottom:14px;left:50%;transform:translateX(-50%);display:flex;gap:6px;pointer-events:auto;}
+  .hslot{min-width:74px;background:rgba(11,14,12,.7);border:1px solid var(--line);border-radius:4px;padding:5px 8px;text-align:center;opacity:.6;cursor:pointer;transition:.12s;}
+  .hslot.active{opacity:1;border-color:var(--acc);background:rgba(242,169,0,.14);}
+  .hslot .hk{font-size:10px;color:var(--dim);display:block;} .hslot .hi{font-size:22px;display:block;line-height:1.1;} .hslot .hn{font-size:11px;color:var(--txt);}
+  #hint{position:absolute;bottom:120px;left:50%;transform:translateX(-50%);background:rgba(11,14,12,.85);border:1px solid var(--acc);border-radius:4px;padding:6px 14px;font-size:14px;opacity:0;transition:.15s;}
+  #hint.show{opacity:1;} #hint b{color:var(--acc2);}
+  #toast{position:absolute;top:80px;left:50%;transform:translateX(-50%);background:rgba(11,14,12,.9);border:1px solid var(--acc2);border-radius:4px;padding:7px 16px;font-size:15px;opacity:0;transition:.2s;}
+  #toast.show{opacity:1;}
+  #chatLog{position:absolute;left:16px;top:90px;font-size:13px;max-width:40vw;}
+  #chatLog div{background:rgba(11,14,12,.6);padding:2px 8px;margin-bottom:3px;border-left:2px solid var(--blue);display:inline-block;}
+  #chatInput{position:absolute;bottom:90px;left:50%;transform:translateX(-50%);width:min(420px,80vw);padding:9px;background:rgba(11,14,12,.95);border:1px solid var(--acc);color:#fff;border-radius:4px;font-size:15px;pointer-events:auto;outline:none;}
+  #dmg{position:fixed;inset:0;z-index:34;pointer-events:none;opacity:0;box-shadow:inset 0 0 140px 50px rgba(231,64,46,.7);transition:.15s;}
+
+  /* 제작 */
+  #craft{position:fixed;inset:0;z-index:55;display:flex;align-items:center;justify-content:center;background:rgba(5,7,5,.78);}
+  .craftbox{background:var(--panel);border:1px solid var(--line);border-radius:10px;width:min(620px,94vw);max-height:88vh;display:flex;flex-direction:column;padding:18px;}
+  .crafthead{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;}
+  .crafthead h2{font-family:'Teko';font-size:30px;letter-spacing:2px;}
+  #ageLabel{font-size:13px;color:var(--acc2);} #invBar{display:flex;flex-wrap:wrap;gap:10px;font-size:14px;background:#0c100b;border:1px solid var(--line);border-radius:5px;padding:8px 10px;margin-bottom:10px;}
+  #recipeList{overflow:auto;display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+  .recipe{display:flex;gap:10px;align-items:center;background:#0c100b;border:1px solid var(--line);border-radius:6px;padding:8px 10px;cursor:pointer;transition:.12s;}
+  .recipe:hover{border-color:var(--acc2);} .recipe.locked{opacity:.35;cursor:not-allowed;} .recipe.poor{opacity:.6;}
+  .recipe .ric{font-size:26px;} .recipe .rn{font-size:15px;} .recipe .rage{font-size:11px;color:var(--dim);} .recipe .rc{font-size:12px;color:var(--acc2);}
+  #advanceAge{margin-top:12px;width:100%;padding:12px;background:linear-gradient(180deg,#7cc043,#558a2e);color:#0a1505;border:none;border-radius:5px;font-family:'Teko';font-size:20px;letter-spacing:1px;cursor:pointer;}
+  .closeX{background:none;border:1px solid var(--line);color:var(--txt);border-radius:4px;padding:5px 12px;cursor:pointer;font-size:14px;}
+
+  /* 죽음 */
+  #dead{z-index:70;} .res-title{font-family:'Teko';font-size:clamp(48px,11vw,100px);color:var(--red);}
+  #deadBy{margin-top:8px;color:var(--dim);font-size:18px;}
+
+  /* 모바일 */
+  #touch{position:fixed;inset:0;z-index:40;pointer-events:none;}
+  #joy{position:absolute;left:24px;bottom:24px;width:118px;height:118px;border-radius:50%;background:rgba(255,255,255,.05);border:2px solid var(--line);pointer-events:auto;}
+  #joyStick{position:absolute;left:50%;top:50%;width:50px;height:50px;transform:translate(-50%,-50%);border-radius:50%;background:rgba(242,169,0,.55);border:2px solid var(--acc);}
+  .tb{position:absolute;pointer-events:auto;border-radius:50%;background:rgba(11,14,12,.55);border:2px solid var(--line);color:var(--txt);font-family:'Teko';font-size:16px;display:flex;align-items:center;justify-content:center;}
+  #tFire{right:26px;bottom:34px;width:90px;height:90px;background:rgba(231,64,46,.22);border-color:var(--red);}
+  #tUse{right:128px;bottom:50px;width:58px;height:58px;background:rgba(124,192,67,.2);border-color:var(--green);}
+  #tJump{right:40px;bottom:136px;width:56px;height:56px;}
+  #tCraft{right:124px;bottom:128px;width:56px;height:56px;}
+  #tReload{right:34px;bottom:206px;width:52px;height:52px;}
+</style>
+</head>
+<body>
+
+<div id="loading">
+  <div class="load-title">BATTLE PLACE</div>
+  <div class="load-bar-bg"><div class="load-bar" id="loadBar"></div></div>
+  <div class="load-txt" id="loadTxt">불러오는 중...</div>
+</div>
+
+<div id="start" class="overlay hidden">
+  <div class="brand">BATTLE<span> PLACE</span><br><span style="font-size:.45em;color:var(--txt)">SURVIVAL</span></div>
+  <div class="brand-sub">석기시대 → 현대 · 모두 함께 생존</div>
+  <div class="panel">
+    <div class="field"><label>닉네임</label><input id="nick" type="text" maxlength="12" placeholder="생존자 이름"></div>
+    <div class="field"><label>나라 선택</label><div id="countryGrid"></div></div>
+    <button class="btn" id="startBtn">생존 시작</button>
+    <div class="keys">
+      <b>이동</b> WASD · <b>달리기</b> Shift · <b>점프</b> Space · <b>웅크리기</b> Ctrl<br>
+      <b>채집/사용</b> F · <b>공격/사격</b> 좌클릭 · <b>제작</b> E · <b>재장전</b> R<br>
+      <b>무기교체</b> 1~9 · <b>채팅</b> Enter
+    </div>
+    <div class="note">🟢 <b>멀티플레이</b>는 <b>net.js</b> 파일에 Supabase 주소·키를 넣으면 자동으로 켜집니다 (안 넣으면 혼자 모드). 서버를 따로 켜둘 필요 없어요.</div>
+  </div>
+</div>
+
+<div id="hud" class="hidden">
+  <div id="cross"></div>
+  <div id="topbar">
+    <span id="clock">🕐 00:00</span>
+    <span>👥 <b id="onlineCount">1</b></span>
+    <span id="netBadge">⚪ 혼자 모드</span>
+  </div>
+  <div id="ageBox">시대<br><b id="ageVal">석기 시대</b></div>
+  <div id="stats">
+    <div class="statrow"><span class="ic">❤️</span><div class="barbg"><div class="bar" id="barHp"></div></div></div>
+    <div class="statrow"><span class="ic">🍖</span><div class="barbg"><div class="bar" id="barHunger"></div></div></div>
+    <div class="statrow"><span class="ic">💧</span><div class="barbg"><div class="bar" id="barThirst"></div></div></div>
+    <div class="statrow"><span class="ic">⚡</span><div class="barbg"><div class="bar" id="barStamina"></div></div></div>
+    <div class="statrow"><span class="ic">🌡️</span><span id="tempVal">36.5°C</span></div>
+  </div>
+  <div id="ammoBox"><span id="ammoVal">—</span></div>
+  <div id="hint"><span id="hintTxt"></span></div>
+  <div id="toast"></div>
+  <div id="chatLog"></div>
+  <input id="chatInput" class="hidden" maxlength="80" placeholder="메시지 입력 후 Enter">
+  <div id="hotbar"></div>
+</div>
+
+<div id="dmg"></div>
+
+<div id="craft" class="hidden">
+  <div class="craftbox">
+    <div class="crafthead"><h2>🛠️ 제작 <span id="ageLabel"></span></h2><button class="closeX" id="craftClose">닫기 (E)</button></div>
+    <div id="invBar"></div>
+    <div id="recipeList"></div>
+    <button id="advanceAge" class="hidden"></button>
+  </div>
+</div>
+
+<div id="dead" class="overlay hidden">
+  <div class="res-title">사망</div>
+  <div id="deadBy"></div>
+  <div class="panel" style="margin-top:20px;"><button class="btn" id="respawnBtn">부활</button></div>
+</div>
+
+<div id="touch" class="hidden">
+  <div id="joy"><div id="joyStick"></div></div>
+  <div class="tb" id="tFire">공격</div>
+  <div class="tb" id="tUse">채집</div>
+  <div class="tb" id="tJump">점프</div>
+  <div class="tb" id="tCraft">제작</div>
+  <div class="tb" id="tReload">장전</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="net.js"></script>
+<script src="survival.js"></script>
+</body>
+</html>
