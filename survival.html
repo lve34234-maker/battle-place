@@ -65,18 +65,36 @@
   #chatInput{position:absolute;bottom:90px;left:50%;transform:translateX(-50%);width:min(420px,80vw);padding:9px;background:rgba(11,14,12,.95);border:1px solid var(--acc);color:#fff;border-radius:4px;font-size:15px;pointer-events:auto;outline:none;}
   #dmg{position:fixed;inset:0;z-index:34;pointer-events:none;opacity:0;box-shadow:inset 0 0 140px 50px rgba(231,64,46,.7);transition:.15s;}
 
-  /* 제작 */
-  #craft{position:fixed;inset:0;z-index:55;display:flex;align-items:center;justify-content:center;background:rgba(5,7,5,.78);}
-  .craftbox{background:var(--panel);border:1px solid var(--line);border-radius:10px;width:min(620px,94vw);max-height:88vh;display:flex;flex-direction:column;padding:18px;}
-  .crafthead{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;}
-  .crafthead h2{font-family:'Teko';font-size:30px;letter-spacing:2px;}
-  #ageLabel{font-size:13px;color:var(--acc2);} #invBar{display:flex;flex-wrap:wrap;gap:10px;font-size:14px;background:#0c100b;border:1px solid var(--line);border-radius:5px;padding:8px 10px;margin-bottom:10px;}
-  #recipeList{overflow:auto;display:grid;grid-template-columns:1fr 1fr;gap:8px;}
-  .recipe{display:flex;gap:10px;align-items:center;background:#0c100b;border:1px solid var(--line);border-radius:6px;padding:8px 10px;cursor:pointer;transition:.12s;}
-  .recipe:hover{border-color:var(--acc2);} .recipe.locked{opacity:.35;cursor:not-allowed;} .recipe.poor{opacity:.6;}
-  .recipe .ric{font-size:26px;} .recipe .rn{font-size:15px;} .recipe .rage{font-size:11px;color:var(--dim);} .recipe .rc{font-size:12px;color:var(--acc2);}
-  #advanceAge{margin-top:12px;width:100%;padding:12px;background:linear-gradient(180deg,#7cc043,#558a2e);color:#0a1505;border:none;border-radius:5px;font-family:'Teko';font-size:20px;letter-spacing:1px;cursor:pointer;}
-  .closeX{background:none;border:1px solid var(--line);color:var(--txt);border-radius:4px;padding:5px 12px;cursor:pointer;font-size:14px;}
+  /* 제작 / 인벤토리 — 마인크래프트 스타일 */
+  #craft{position:fixed;inset:0;z-index:55;display:flex;align-items:center;justify-content:center;background:rgba(5,7,5,.82);}
+  .mc{background:#c6c6c6;border:4px solid;border-color:#fefefe #555 #555 #fefefe;border-radius:2px;
+    width:min(560px,95vw);max-height:90vh;display:flex;flex-direction:column;padding:14px 16px;
+    font-family:'Oswald',sans-serif;color:#3b3b3b;box-shadow:0 20px 60px rgba(0,0,0,.7);}
+  .mc .crafthead{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;}
+  .mc .crafthead h2{font-family:'Teko';font-size:28px;letter-spacing:1px;color:#3b3b3b;}
+  #ageLabel{font-size:13px;color:#5a4a1a;font-weight:600;}
+  .mc-label{font-size:13px;font-weight:700;color:#3b3b3b;margin:10px 0 5px;}
+  .mc-label small{font-weight:400;color:#6b6b6b;}
+  .mc-grid{display:flex;flex-wrap:wrap;gap:5px;}
+  .mc-recipes{display:flex;flex-wrap:wrap;gap:6px;overflow:auto;padding:2px;}
+  /* 슬롯(움푹 들어간 회색 칸) */
+  .mc-slot{position:relative;width:46px;height:46px;background:#8b8b8b;
+    border:3px solid;border-color:#373737 #fff #fff #373737;display:flex;align-items:center;justify-content:center;}
+  .mc-slot .si{font-size:24px;line-height:1;}
+  .mc-slot .sc{position:absolute;right:1px;bottom:-1px;font-size:13px;font-weight:700;color:#fff;text-shadow:1px 1px 0 #3b3b3b;}
+  .mc-slot .kk{position:absolute;left:2px;top:0;font-size:10px;color:#fff;text-shadow:1px 1px 0 #3b3b3b;}
+  .mc-slot .lock{position:absolute;font-size:18px;opacity:.85;}
+  .mc-slot.empty{opacity:.55;} .mc-slot.gear{cursor:pointer;}
+  .mc-slot.active{border-color:#f2a900 #ffe9a8 #ffe9a8 #f2a900;background:#a99463;}
+  /* 제작 항목: 슬롯 + 이름 + 비용 */
+  .recipe{display:flex;flex-direction:column;align-items:center;width:78px;cursor:pointer;
+    background:#bdbdbd;border:2px solid;border-color:#fefefe #777 #777 #fefefe;padding:4px 2px;}
+  .recipe:hover{background:#cfcfcf;} .recipe.locked{opacity:.4;cursor:not-allowed;} .recipe.poor{opacity:.65;}
+  .recipe .rn{font-size:11px;font-weight:700;margin-top:3px;text-align:center;line-height:1.1;color:#2b2b2b;}
+  .recipe .rc{font-size:10px;color:#5a4a1a;text-align:center;}
+  #advanceAge{margin-top:12px;width:100%;padding:11px;background:#6aa83a;color:#0a1505;
+    border:3px solid;border-color:#9bd96a #3d6a1f #3d6a1f #9bd96a;font-family:'Teko';font-size:19px;letter-spacing:1px;cursor:pointer;}
+  .closeX{background:#8b8b8b;border:3px solid;border-color:#fff #373737 #373737 #fff;color:#2b2b2b;padding:4px 10px;cursor:pointer;font-size:13px;font-weight:700;}
 
   /* 죽음 */
   #dead{z-index:70;} .res-title{font-family:'Teko';font-size:clamp(48px,11vw,100px);color:var(--red);}
@@ -144,10 +162,14 @@
 <div id="dmg"></div>
 
 <div id="craft" class="hidden">
-  <div class="craftbox">
-    <div class="crafthead"><h2>🛠️ 제작 <span id="ageLabel"></span></h2><button class="closeX" id="craftClose">닫기 (E)</button></div>
-    <div id="invBar"></div>
-    <div id="recipeList"></div>
+  <div class="craftbox mc">
+    <div class="crafthead"><h2>🎒 인벤토리</h2><span id="ageLabel"></span><button class="closeX" id="craftClose">✕ 닫기 (E)</button></div>
+    <div class="mc-label">가방 — 재료</div>
+    <div id="invGrid" class="mc-grid"></div>
+    <div class="mc-label">보유 도구 · 무기 <small>(클릭해서 장착)</small></div>
+    <div id="gearGrid" class="mc-grid"></div>
+    <div class="mc-label">제작 <small>(클릭해서 만들기)</small></div>
+    <div id="recipeList" class="mc-recipes"></div>
     <button id="advanceAge" class="hidden"></button>
   </div>
 </div>
