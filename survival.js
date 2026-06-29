@@ -120,6 +120,9 @@ const glbModels = {};
 let terrainMesh;
 let resources = [];   // 채집물 {mesh,type,hp,x,z}
 let animals = [];
+let props = [];       // 버려진 차량 등 장애물 {mesh,x,z,rad}
+let zombies = [];     // 감염체(밤 적) {mesh,x,z,hp,phase,nextHit,alive}
+let wasNight = false;
 let others = {};      // 다른 플레이어 {id:{group,nameSprite,hp,target,...}}
 let projectiles = [];
 let state = "loading";
@@ -333,9 +336,10 @@ function buildWorld() {
   water.rotation.x = -Math.PI / 2; water.position.y = SEA;
   scene.add(water);
 
-  // 채집물 + 무성한 풀
+  // 채집물 + 무성한 풀 + 버려진 차량
   scatterResources();
   scatterGrass();
+  scatterVehicles(6);
 }
 
 /* 우거진 풀 — InstancedMesh 1개로 수천 포기(가벼움) */
@@ -379,23 +383,71 @@ function scatterResources() {
       n++;
     }
   };
-  place("tree", 220, () => {
-    const g = new THREE.Group();
-    const h = 4 + Math.random() * 4;
-    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.45, h, 7),
-      new THREE.MeshStandardMaterial({ color: 0x6b4a2b, roughness: 1 }));
-    trunk.position.y = h / 2; g.add(trunk);
-    const leaf = new THREE.Mesh(new THREE.IcosahedronGeometry(2.4 + Math.random(), 0),
-      new THREE.MeshStandardMaterial({ color: 0x2f6b30, roughness: 0.9, flatShading: true }));
-    leaf.position.y = h + 1; g.add(leaf);
-    return g;
+  place("tree", 240, makeTree);
+  place("rock", 130, makeRock);
+  place("bush", 110, makeBush);
+}
+
+/* ---- 디테일 있는 채집물 모델 (scatter & 리스폰 공용) ---- */
+function makeTree() {
+  const g = new THREE.Group();
+  const h = 4.5 + Math.random() * 4.5;
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.5, h, 8),
+    new THREE.MeshStandardMaterial({ color: 0x5a3d22, roughness: 1 }));
+  trunk.position.y = h / 2; g.add(trunk);
+  // 잎: 3겹으로 쌓아 풍성하게 + 색 변주
+  const leafMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color().setHSL(0.27 + Math.random() * 0.04, 0.5, 0.24 + Math.random() * 0.1),
+    roughness: 0.92, flatShading: true,
   });
-  place("rock", 120, () => new THREE.Mesh(
-    new THREE.DodecahedronGeometry(1 + Math.random() * 1.2, 0),
-    new THREE.MeshStandardMaterial({ color: 0x808080, roughness: 0.85, metalness: 0.05, flatShading: true })));
-  place("bush", 90, () => new THREE.Mesh(
-    new THREE.IcosahedronGeometry(0.8, 0),
-    new THREE.MeshStandardMaterial({ color: 0x4f8b3a, roughness: 1, flatShading: true })));
+  for (let k = 0; k < 3; k++) {
+    const r = 2.7 - k * 0.65 + Math.random() * 0.3;
+    const blob = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 0), leafMat);
+    blob.position.set((Math.random() - .5) * 0.5, h + 0.3 + k * 1.25, (Math.random() - .5) * 0.5);
+    blob.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+    g.add(blob);
+  }
+  return g;
+}
+function makeRock() {
+  const g = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ color: 0x7c7c7c, roughness: 0.8, metalness: 0.06, flatShading: true });
+  const n = 2 + (Math.random() * 3 | 0);
+  for (let k = 0; k < n; k++) {
+    const r = 0.7 + Math.random() * 1.2;
+    const m = new THREE.Mesh(new THREE.DodecahedronGeometry(r, 0), mat);
+    m.position.set((Math.random() - .5) * 1.4, r * 0.4, (Math.random() - .5) * 1.4);
+    m.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+    g.add(m);
+  }
+  return g;
+}
+function makeBush() {
+  const g = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ color: 0x4f8b3a, roughness: 1, flatShading: true });
+  for (let k = 0; k < 3; k++) {
+    const m = new THREE.Mesh(new THREE.IcosahedronGeometry(0.5 + Math.random() * 0.4, 0), mat);
+    m.position.set((Math.random() - .5) * 0.8, 0.4 + Math.random() * 0.3, (Math.random() - .5) * 0.8);
+    g.add(m);
+  }
+  return g;
+}
+
+/* 버려진 차량(c4=사이버트럭 모델) 흩뿌리기 — 폐허 분위기 + 장애물 */
+function scatterVehicles(n) {
+  if (!glbModels.c4) return;
+  let placed = 0, tries = 0;
+  while (placed < n && tries < n * 40) {
+    tries++;
+    const x = (Math.random() - .5) * 560, z = (Math.random() - .5) * 560, y = heightAt(x, z);
+    if (y < SEA + 1.2 || y > 26) continue;
+    const m = glbModels.c4.clone(true);
+    m.position.set(x, y, z); m.rotation.y = Math.random() * 6.28;
+    m.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    scene.add(m);
+    props.push({ mesh: m, x, z, rad: 2.4 });
+    placed++;
+  }
 }
 
 function spawnAnimals(n) {
@@ -429,6 +481,76 @@ function spawnAnimals(n) {
       speed: 0, state: "graze", timer: Math.random() * 3, phase: Math.random() * 6.28,
     });
   }
+}
+
+/* ============================================================
+   감염체(좀비) — 밤에 출현해서 플레이어를 쫓아옴
+   ============================================================ */
+function makeZombie() {
+  const g = new THREE.Group();
+  const skin = new THREE.MeshStandardMaterial({ color: 0x5b6e3a, roughness: 1 });
+  const cloth = new THREE.MeshStandardMaterial({ color: 0x33381f, roughness: 1 });
+  const body = new THREE.Mesh(THREE.CapsuleGeometry ? new THREE.CapsuleGeometry(0.34, 0.9, 4, 8) : new THREE.CylinderGeometry(0.34, 0.34, 1.4, 8), cloth);
+  body.position.y = 1.0; g.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), skin);
+  head.position.y = 1.85; g.add(head);
+  // 앞으로 뻗은 팔(좀비 느낌)
+  const armGeo = new THREE.BoxGeometry(0.16, 0.16, 0.8, 1, 1, 1); armGeo.translate(0, 0, 0.4);
+  const arms = [];
+  [-0.4, 0.4].forEach(ax => { const a = new THREE.Mesh(armGeo, skin); a.position.set(ax, 1.25, 0.25); g.add(a); arms.push(a); });
+  g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  return { group: g, arms };
+}
+function spawnZombie() {
+  const ang = Math.random() * Math.PI * 2, dist = 28 + Math.random() * 22;
+  let x = P.pos.x + Math.cos(ang) * dist, z = P.pos.z + Math.sin(ang) * dist;
+  x = Math.max(-340, Math.min(340, x)); z = Math.max(-340, Math.min(340, z));
+  if (heightAt(x, z) < SEA + 1) return;
+  const zm = makeZombie();
+  zm.group.position.set(x, heightAt(x, z), z); scene.add(zm.group);
+  zombies.push({ mesh: zm.group, arms: zm.arms, x, z, hp: 60, phase: Math.random() * 6, nextHit: 0, alive: true });
+}
+function damageZombie(z, dmg) {
+  z.hp -= dmg;
+  flash(z.mesh.position.clone().setY(z.mesh.position.y + 1.2), 0x88ff44);
+  if (z.hp <= 0) killZombie(z);
+}
+function killZombie(z) {
+  if (!z.alive) return;
+  z.alive = false; scene.remove(z.mesh);
+  zombies = zombies.filter(x => x !== z);
+  P.kills++; if (Math.random() < 0.4) addItem("food", 1);
+  toast("감염체 처치 🧟 +1");
+}
+function updateZombies(dt) {
+  const night = dayTime < 0.24 || dayTime > 0.80;
+  // 밤 시작/종료 알림
+  if (night && !wasNight) { toast("🌙 밤이다 — 감염체가 몰려온다!"); wasNight = true; }
+  if (!night && wasNight) { wasNight = false; }
+  // 밤이면 일정 수 유지, 낮이면 서서히 소멸
+  const target = night ? Math.min(18, 5 + P.age * 2) : 0;
+  if (zombies.length < target && Math.random() < dt * 1.5) spawnZombie();
+  if (!night && zombies.length && Math.random() < dt * 0.6) { const z = zombies[0]; if (z) killZombieSilently(z); }
+
+  for (const z of zombies) {
+    if (!z.alive) continue;
+    const dx = P.pos.x - z.x, dz = P.pos.z - z.z, d = Math.hypot(dx, dz);
+    const h = Math.atan2(dz, dx);
+    const sp = 2.6;
+    if (d > 1.6) {
+      const nx = z.x + Math.cos(h) * sp * dt, nz = z.z + Math.sin(h) * sp * dt;
+      if (heightAt(nx, nz) > SEA + 0.5) { z.x = nx; z.z = nz; z.phase += dt * 6; }
+    } else if (P.alive && performance.now() >= z.nextHit) {
+      z.nextHit = performance.now() + 900; damageSelf(8, "감염체"); flashHurt();
+    }
+    z.mesh.position.set(z.x, heightAt(z.x, z.z) + Math.abs(Math.sin(z.phase)) * 0.06, z.z);
+    z.mesh.rotation.y = -h + Math.PI / 2;
+    if (z.arms) z.arms.forEach((a, i) => a.rotation.x = Math.sin(z.phase + i) * 0.25 - 0.2);
+  }
+}
+function killZombieSilently(z) { z.alive = false; scene.remove(z.mesh); zombies = zombies.filter(x => x !== z); }
+function flashHurt() {
+  const v = document.getElementById("dmg"); v.style.opacity = "1"; setTimeout(() => v.style.opacity = "0", 150);
 }
 
 /* ============================================================
@@ -475,6 +597,7 @@ function animate() {
   updatePlayer(dt);
   updateSurvival(dt);
   updateAnimals(dt);
+  updateZombies(dt);
   updateProjectiles(dt);
   updateOthers(dt);
   updateBuild();
@@ -549,6 +672,10 @@ function blockedAt(x, z) {
   for (const a of animals) {
     if (!a.alive) continue;
     const dx = x - a.x, dz = z - a.z, rr = pr + 0.6;
+    if (dx * dx + dz * dz < rr * rr) return true;
+  }
+  for (const p of props) {
+    const dx = x - p.x, dz = z - p.z, rr = pr + p.rad;
     if (dx * dx + dz * dz < rr * rr) return true;
   }
   for (const b of blocks) {
@@ -724,13 +851,7 @@ function harvest(r) {
 function respawnResource(type) {
   let x, z, y, t = 0;
   do { x = (Math.random() - .5) * 640; z = (Math.random() - .5) * 640; y = heightAt(x, z); t++; } while (y < SEA + 2 && t < 30);
-  const mk = type === "tree" ? () => {
-    const g = new THREE.Group(); const h = 4 + Math.random() * 4;
-    const tr = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.45, h, 7), new THREE.MeshStandardMaterial({ color: 0x6b4a2b }));
-    tr.position.y = h / 2; g.add(tr);
-    const lf = new THREE.Mesh(new THREE.IcosahedronGeometry(2.4, 0), new THREE.MeshStandardMaterial({ color: 0x2f6b30, flatShading: true })); lf.position.y = h + 1; g.add(lf); return g;
-  } : type === "rock" ? () => new THREE.Mesh(new THREE.DodecahedronGeometry(1.2, 0), new THREE.MeshStandardMaterial({ color: 0x808080, flatShading: true }))
-    : () => new THREE.Mesh(new THREE.IcosahedronGeometry(0.8, 0), new THREE.MeshStandardMaterial({ color: 0x4f8b3a, flatShading: true }));
+  const mk = type === "tree" ? makeTree : type === "rock" ? makeRock : makeBush;
   const m = mk(); m.position.set(x, y, z); m.traverse(o => { if (o.isMesh) o.castShadow = true; });
   scene.add(m); resources.push({ mesh: m, type, x, z, y, hp: type === "rock" ? 5 : type === "tree" ? 4 : 2, rad: type === "rock" ? 1.1 : type === "tree" ? 0.6 : 0 });
 }
@@ -772,6 +893,14 @@ function meleeAttack(w) {
       return;
     }
   }
+  // 감염체(좀비)
+  for (const z of zombies) {
+    if (!z.alive) continue;
+    const c = z.mesh.position.clone(); c.y += 1.0;
+    if (origin.distanceTo(c) < (w.range || 3) && dir.dot(c.clone().sub(origin).normalize()) > 0.6) {
+      damageZombie(z, w.dmg); return;
+    }
+  }
   // 플레이어
   hitOtherPlayers(origin, dir, w.range || 3, w.dmg);
 }
@@ -798,6 +927,11 @@ function fireRanged(w) {
       a.hp -= w.dmg; if (a.hp <= 0) { a.alive = false; scene.remove(a.mesh); addItem("food", 3); }
       hit = true; break;
     }
+  }
+  if (!hit) for (const z of zombies) {
+    if (!z.alive) continue;
+    const c = z.mesh.position.clone(); c.y += 1.0;
+    if (raySphere(origin, dir, c, 0.8) !== null) { damageZombie(z, w.dmg); hit = true; break; }
   }
   if (!hit) hitOtherPlayers(origin, dir, w.range, w.dmg);
   recoilKick(w);
@@ -854,6 +988,11 @@ function updateProjectiles(dt) {
       if (!a.alive) continue;
       const c = new THREE.Vector3(a.x, heightAt(a.x, a.z) + 0.9, a.z);
       if (p.mesh.position.distanceTo(c) < 1) { a.hp -= p.dmg; if (a.hp <= 0) { a.alive = false; scene.remove(a.mesh); addItem("food", 3); } dead = true; }
+    }
+    for (const z of zombies) {
+      if (!z.alive) continue;
+      const c = z.mesh.position.clone(); c.y += 1;
+      if (p.mesh.position.distanceTo(c) < 1) { damageZombie(z, p.dmg); dead = true; }
     }
     for (const id in others) {
       const c = others[id].group.position.clone(); c.y += 1;
@@ -1181,7 +1320,7 @@ function toast(msg) {
    GLB 로더 (외부 라이브러리 불필요) — MeshStandardMaterial로 변환(빛반사)
    ============================================================ */
 function loadModels(done) {
-  const list = ["m4a1", "mp5k", "ksr29", "awp"]; // 제작에 쓰는 모던 무기
+  const list = ["m4a1", "mp5k", "ksr29", "awp", "c4"]; // 모던 무기 + 버려진 차량(c4)
   let loaded = 0; let finished = false;
   const bar = document.getElementById("loadBar"), txt = document.getElementById("loadTxt");
   const step = () => {
