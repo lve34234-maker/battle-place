@@ -94,8 +94,20 @@ const RECIPES = [
 
 /* ---------------- 전역 ---------------- */
 let scene, camera, renderer, clock, sun, hemi, sky, water, envRT;
+let skyMode = "dome", waterN = null;
 let composer, gradePass, fxaaPass, useFX = false;
 let raycaster = new THREE.Raycaster();
+
+/* ============================================================
+   ★ 내 3D 모델(.glb) 넣기 ★
+   무료 모델을 저장소에 올린 뒤(예: tree1.glb) 아래에 등록하면
+   게임에 자동 배치됩니다. as: "tree"(벌목가능)·"rock"(채광가능)·"prop"(장애물)
+   ============================================================ */
+const CUSTOM_MODELS = [
+  // { file: "tree1", as: "tree", count: 120, scale: 1, solidRad: 0.6 },
+  // { file: "rock1", as: "rock", count: 50,  scale: 1, solidRad: 1.2 },
+  // { file: "car1",  as: "prop", count: 8,   scale: 1, solidRad: 2.4 },
+];
 
 /* 시네마틱 컬러 그레이딩 + 비네트 + 필름 그레인 (TLOU 무드) */
 const GradeShader = {
@@ -248,16 +260,21 @@ function initThree() {
   scene.environment = envRT.texture;
   skyTex.dispose();
 
-  // 하늘 돔
-  const skyGeo = new THREE.SphereGeometry(1500, 32, 16);
-  const skyMat = new THREE.ShaderMaterial({
-    side: THREE.BackSide, depthWrite: false,
-    uniforms: { top: { value: new THREE.Color(0x2a6bd4) }, bot: { value: new THREE.Color(0xcfe6ff) } },
-    vertexShader: "varying vec3 vp; void main(){ vp=position; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}",
-    fragmentShader: "varying vec3 vp; uniform vec3 top; uniform vec3 bot; void main(){ float h=clamp((normalize(vp).y+0.1)*0.9,0.0,1.0); gl_FragColor=vec4(mix(bot,top,h),1.0);}",
-  });
-  sky = new THREE.Mesh(skyGeo, skyMat);
-  scene.add(sky);
+  // 하늘 — 가능하면 대기 산란(Preetham Sky), 아니면 그라데이션 돔
+  if (THREE.Sky) {
+    sky = new THREE.Sky(); sky.scale.setScalar(12000); scene.add(sky); skyMode = "sky";
+    const u = sky.material.uniforms;
+    u.turbidity.value = 6; u.rayleigh.value = 2.2;
+    u.mieCoefficient.value = 0.005; u.mieDirectionalG.value = 0.8;
+  } else {
+    const skyMat = new THREE.ShaderMaterial({
+      side: THREE.BackSide, depthWrite: false,
+      uniforms: { top: { value: new THREE.Color(0x2a6bd4) }, bot: { value: new THREE.Color(0xcfe6ff) } },
+      vertexShader: "varying vec3 vp; void main(){ vp=position; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}",
+      fragmentShader: "varying vec3 vp; uniform vec3 top; uniform vec3 bot; void main(){ float h=clamp((normalize(vp).y+0.1)*0.9,0.0,1.0); gl_FragColor=vec4(mix(bot,top,h),1.0);}",
+    });
+    sky = new THREE.Mesh(new THREE.SphereGeometry(1500, 32, 16), skyMat); scene.add(sky); skyMode = "dome";
+  }
   scene.fog = new THREE.FogExp2(0xbcd2e8, 0.0016);
 
   addEventListener("resize", () => {
@@ -300,6 +317,34 @@ function makeSkyEquirect() {
   return t;
 }
 
+/* 절차적 노멀맵 — 외부 이미지 없이 표면 굴곡(디테일) 생성 */
+function makeNormalMap(size, strength) {
+  size = size || 256; strength = strength || 2;
+  const h = new Float32Array(size * size);
+  for (let i = 0; i < size * size; i++) h[i] = Math.random();
+  const sm = new Float32Array(size * size);
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    let s = 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++)
+      s += h[((y + dy + size) % size) * size + ((x + dx + size) % size)];
+    sm[y * size + x] = s / 9;
+  }
+  const cv = document.createElement("canvas"); cv.width = cv.height = size;
+  const ctx = cv.getContext("2d"); const img = ctx.createImageData(size, size);
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const dzdx = (sm[y * size + (x + 1) % size] - sm[y * size + (x - 1 + size) % size]) * strength;
+    const dzdy = (sm[((y + 1) % size) * size + x] - sm[((y - 1 + size) % size) * size + x]) * strength;
+    const nx = -dzdx, ny = -dzdy, nz = 1, len = Math.hypot(nx, ny, nz), i = (y * size + x) * 4;
+    img.data[i] = (nx / len * 0.5 + 0.5) * 255;
+    img.data[i + 1] = (ny / len * 0.5 + 0.5) * 255;
+    img.data[i + 2] = (nz / len * 0.5 + 0.5) * 255;
+    img.data[i + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(cv); t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+
 /* ============================================================
    월드: 현실적 지형 + 바다 + 채집물
    ============================================================ */
@@ -322,24 +367,53 @@ function buildWorld() {
     colors.push(col.r, col.g, col.b);
   }
   geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
-  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0.0, envMapIntensity: 0.35 });
+  const groundN = makeNormalMap(256, 2.2); groundN.repeat.set(90, 90);
+  const mat = new THREE.MeshStandardMaterial({
+    vertexColors: true, roughness: 0.96, metalness: 0.0, envMapIntensity: 0.35,
+    normalMap: groundN, normalScale: new THREE.Vector2(0.45, 0.45),
+  });
   terrainMesh = new THREE.Mesh(geo, mat);
   terrainMesh.receiveShadow = true;
   scene.add(terrainMesh);
 
-  // 바다 (빛반사)
+  // 바다 (빛반사 + 움직이는 물결)
+  waterN = makeNormalMap(256, 3); waterN.repeat.set(34, 34);
   const wmat = new THREE.MeshStandardMaterial({
-    color: 0x2b6f8f, transparent: true, opacity: 0.82,
-    roughness: 0.06, metalness: 0.0, envMapIntensity: 1.0,
+    color: 0x265f7a, transparent: true, opacity: 0.86,
+    roughness: 0.08, metalness: 0.1, envMapIntensity: 1.0,
+    normalMap: waterN, normalScale: new THREE.Vector2(0.55, 0.55),
   });
   water = new THREE.Mesh(new THREE.PlaneGeometry(SIZE * 1.2, SIZE * 1.2), wmat);
   water.rotation.x = -Math.PI / 2; water.position.y = SEA;
   scene.add(water);
 
-  // 채집물 + 무성한 풀 + 버려진 차량
+  // 채집물 + 무성한 풀 + 버려진 차량 + 사용자 모델
   scatterResources();
   scatterGrass();
   scatterVehicles(6);
+  placeCustomModels();
+}
+
+/* 사용자가 CUSTOM_MODELS에 등록한 .glb 배치 */
+function placeCustomModels() {
+  for (const cm of CUSTOM_MODELS) {
+    if (!glbModels[cm.file]) { console.warn("[모델 없음]", cm.file + ".glb 를 저장소에 올렸는지 확인하세요"); continue; }
+    let placed = 0, tries = 0;
+    while (placed < (cm.count || 20) && tries < (cm.count || 20) * 40) {
+      tries++;
+      const x = (Math.random() - .5) * 640, z = (Math.random() - .5) * 640, y = heightAt(x, z);
+      if (y < SEA + 1 || y > 34) continue;
+      const m = glbModels[cm.file].clone(true);
+      m.position.set(x, y, z); m.rotation.y = Math.random() * 6.28;
+      if (cm.scale) m.scale.multiplyScalar(cm.scale);
+      m.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+      scene.add(m);
+      if (cm.as === "tree") resources.push({ mesh: m, type: "tree", x, z, y, hp: 4, rad: cm.solidRad || 0.6 });
+      else if (cm.as === "rock") resources.push({ mesh: m, type: "rock", x, z, y, hp: 5, rad: cm.solidRad || 1.1 });
+      else props.push({ mesh: m, x, z, rad: cm.solidRad || 1.5 });
+      placed++;
+    }
+  }
 }
 
 /* 우거진 풀 — InstancedMesh 1개로 수천 포기(가벼움) */
@@ -1227,17 +1301,29 @@ function makeNameSprite(text) {
 function updateDayNight(dt) {
   dayTime = (dayTime + dt / DAY_LEN) % 1;
   const ang = dayTime * Math.PI * 2 - Math.PI / 2;
-  const sx = Math.cos(ang), sy = Math.sin(ang);
-  sun.position.set(sx * 200 + P.pos.x, sy * 200, 80 + P.pos.z);
+  const sx = Math.cos(ang), sy = Math.sin(ang), sz = 0.35;
+  sun.position.set(sx * 200 + P.pos.x, sy * 200, sz * 200 + P.pos.z);
   sun.target.position.copy(P.pos);
   const day = Math.max(0, sy);
-  sun.intensity = 0.2 + day * 2.2;
-  hemi.intensity = 0.25 + day * 0.6;
-  const sky1 = new THREE.Color(0x0a1020).lerp(new THREE.Color(0x2a6bd4), day);
-  const sky2 = new THREE.Color(0x12203a).lerp(new THREE.Color(0xcfe6ff), day);
-  if (sky) { sky.material.uniforms.top.value.copy(sky1); sky.material.uniforms.bot.value.copy(sky2); }
-  scene.fog.color.copy(sky2);
-  renderer.toneMappingExposure = 0.55 + day * 0.6;
+  sun.intensity = 0.15 + day * 2.4;
+  sun.color.setHSL(0.09, 0.6, 0.5 + 0.45 * Math.min(1, day * 2)); // 일출/일몰 붉은빛
+  hemi.intensity = 0.2 + day * 0.6;
+
+  if (skyMode === "sky") {
+    const sunDir = new THREE.Vector3(sx, sy, sz).normalize();
+    sky.material.uniforms.sunPosition.value.copy(sunDir);
+    const fogc = new THREE.Color(0x223040).lerp(new THREE.Color(0xbcd2e8), day);
+    scene.fog.color.copy(fogc);
+  } else {
+    const sky2 = new THREE.Color(0x12203a).lerp(new THREE.Color(0xcfe6ff), day);
+    sky.material.uniforms.top.value.copy(new THREE.Color(0x0a1020).lerp(new THREE.Color(0x2a6bd4), day));
+    sky.material.uniforms.bot.value.copy(sky2);
+    scene.fog.color.copy(sky2);
+  }
+  renderer.toneMappingExposure = 0.5 + day * 0.65;
+
+  // 물결 애니메이션
+  if (waterN) { waterN.offset.x = (waterN.offset.x + dt * 0.03) % 1; waterN.offset.y = (waterN.offset.y + dt * 0.02) % 1; }
 }
 
 /* ============================================================
@@ -1320,7 +1406,8 @@ function toast(msg) {
    GLB 로더 (외부 라이브러리 불필요) — MeshStandardMaterial로 변환(빛반사)
    ============================================================ */
 function loadModels(done) {
-  const list = ["m4a1", "mp5k", "ksr29", "awp", "c4"]; // 모던 무기 + 버려진 차량(c4)
+  const base = ["m4a1", "mp5k", "ksr29", "awp", "c4"]; // 모던 무기 + 버려진 차량(c4)
+  const list = [...new Set([...base, ...CUSTOM_MODELS.map(m => m.file)])]; // + 사용자 모델
   let loaded = 0; let finished = false;
   const bar = document.getElementById("loadBar"), txt = document.getElementById("loadTxt");
   const step = () => {
