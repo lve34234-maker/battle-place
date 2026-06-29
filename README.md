@@ -43,6 +43,20 @@ PC·모바일 어디서나 열리고, 나중에 **.exe / .apk** 로도 포장할
 
 ---
 
+## 🌳 내 3D 모델 넣기 (화질 업그레이드)
+진짜 사실적으로 만들려면 무료 3D 모델(.glb)을 추가하세요.
+1. [Poly Pizza](https://poly.pizza) / [Sketchfab](https://sketchfab.com)(Downloadable·CC0)에서 `.glb` 다운로드
+2. 저장소에 파일 업로드 (예: `tree1.glb`)
+3. `survival.js` 상단 `CUSTOM_MODELS` 에 등록:
+   ```js
+   const CUSTOM_MODELS = [
+     { file: "tree1", as: "tree", count: 120, scale: 1, solidRad: 0.6 }, // 벌목 가능
+     { file: "rock1", as: "rock", count: 50,  scale: 1, solidRad: 1.2 }, // 채광 가능
+     { file: "car1",  as: "prop", count: 8,   scale: 1, solidRad: 2.4 }, // 장애물
+   ];
+   ```
+4. 끝! 게임 시작 시 자동으로 지형에 배치됩니다.
+
 ## 📦 .exe / .apk 만들기
 `packaging/README.md` 참고.
 - **.exe**: Electron (`packaging/electron`)
