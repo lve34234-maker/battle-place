@@ -60,6 +60,8 @@
   #hint.show{opacity:1;} #hint b{color:var(--acc2);}
   #toast{position:absolute;top:80px;left:50%;transform:translateX(-50%);background:rgba(11,14,12,.9);border:1px solid var(--acc2);border-radius:4px;padding:7px 16px;font-size:15px;opacity:0;transition:.2s;}
   #toast.show{opacity:1;}
+  #buildBadge{position:absolute;top:46px;left:50%;transform:translateX(-50%);background:rgba(11,40,16,.85);border:1px solid var(--green);border-radius:4px;padding:6px 14px;font-size:13px;color:#cfe8b8;}
+  #buildBadge b{color:#aef07c;}
   #chatLog{position:absolute;left:16px;top:90px;font-size:13px;max-width:40vw;}
   #chatLog div{background:rgba(11,14,12,.6);padding:2px 8px;margin-bottom:3px;border-left:2px solid var(--blue);display:inline-block;}
   #chatInput{position:absolute;bottom:90px;left:50%;transform:translateX(-50%);width:min(420px,80vw);padding:9px;background:rgba(11,14,12,.95);border:1px solid var(--acc);color:#fff;border-radius:4px;font-size:15px;pointer-events:auto;outline:none;}
@@ -110,6 +112,8 @@
   #tJump{right:40px;bottom:136px;width:56px;height:56px;}
   #tCraft{right:124px;bottom:128px;width:56px;height:56px;}
   #tReload{right:34px;bottom:206px;width:52px;height:52px;}
+  #tBuild{left:30px;bottom:212px;width:54px;height:54px;background:rgba(124,192,67,.2);border-color:var(--green);}
+  #tMat{left:98px;bottom:202px;width:50px;height:50px;}
 </style>
 </head>
 <body>
@@ -130,6 +134,7 @@
     <div class="keys">
       <b>이동</b> WASD · <b>달리기</b> Shift · <b>점프</b> Space · <b>웅크리기</b> Ctrl<br>
       <b>채집/사용</b> F · <b>공격/사격</b> 좌클릭 · <b>제작</b> E · <b>재장전</b> R<br>
+      <b>건축모드</b> B (좌클릭 설치 · X 제거 · Q 재료변경)<br>
       <b>무기교체</b> 1~9 · <b>채팅</b> Enter
     </div>
     <div class="note">🟢 <b>멀티플레이</b>는 <b>net.js</b> 파일에 Supabase 주소·키를 넣으면 자동으로 켜집니다 (안 넣으면 혼자 모드). 서버를 따로 켜둘 필요 없어요.</div>
@@ -154,6 +159,7 @@
   <div id="ammoBox"><span id="ammoVal">—</span></div>
   <div id="hint"><span id="hintTxt"></span></div>
   <div id="toast"></div>
+  <div id="buildBadge" class="hidden"></div>
   <div id="chatLog"></div>
   <input id="chatInput" class="hidden" maxlength="80" placeholder="메시지 입력 후 Enter">
   <div id="hotbar"></div>
@@ -187,6 +193,8 @@
   <div class="tb" id="tJump">점프</div>
   <div class="tb" id="tCraft">제작</div>
   <div class="tb" id="tReload">장전</div>
+  <div class="tb" id="tBuild">건축</div>
+  <div class="tb" id="tMat">재료</div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
