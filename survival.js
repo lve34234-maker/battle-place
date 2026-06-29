@@ -68,11 +68,14 @@ const COUNTRIES = [
 // 자원: wood 나무, stone 돌, fiber 섬유, iron 철, gunpowder 화약, food 음식
 const AGES = ["석기 시대", "청동기·철기", "중세", "화약 시대", "현대"];
 const RECIPES = [
-  // 석기
-  { id: "stone_axe",   name: "돌도끼",   age: 0, cost: { wood: 3, stone: 2 },            dmg: 18, range: 3.2, kind: "melee", icon: "🪓", gather: 1.8 },
+  // 석기 (★ 나무곡괭이부터: 나무만으로 만들어 돌을 캘 수 있음 — 마크처럼)
+  { id: "wood_pickaxe",  name: "나무곡괭이", age: 0, cost: { wood: 3 },                    dmg: 10, range: 3.0, kind: "melee", mine: 1, icon: "⛏️" },
+  { id: "stone_pickaxe", name: "돌곡괭이",   age: 0, cost: { wood: 2, stone: 3 },          dmg: 16, range: 3.2, kind: "melee", mine: 2, icon: "⛏️" },
+  { id: "stone_axe",   name: "돌도끼",   age: 0, cost: { wood: 3, stone: 2 },            dmg: 18, range: 3.2, kind: "melee", mine: 2, icon: "🪓" },
   { id: "stone_spear", name: "돌창",     age: 0, cost: { wood: 4, stone: 2, fiber: 2 },  dmg: 26, range: 4.0, kind: "melee", icon: "🗡️" },
   { id: "campfire",    name: "모닥불",   age: 0, cost: { wood: 6, stone: 4 },            kind: "build", icon: "🔥" },
   // 청동기·철기
+  { id: "iron_pickaxe", name: "철곡괭이", age: 1, cost: { iron: 3, wood: 2 },            dmg: 24, range: 3.4, kind: "melee", mine: 3, icon: "⛏️" },
   { id: "iron_sword",  name: "철검",     age: 1, cost: { iron: 4, wood: 2 },             dmg: 40, range: 3.4, kind: "melee", icon: "⚔️" },
   { id: "bow",         name: "활",       age: 1, cost: { wood: 5, fiber: 4 },            dmg: 35, range: 70, kind: "ranged", proj: 55, icon: "🏹", mag: 1, reload: 1.1 },
   { id: "shield",      name: "방패",     age: 1, cost: { iron: 3, wood: 3 },             kind: "armor", armor: 0.4, icon: "🛡️" },
@@ -325,12 +328,21 @@ function spawnAnimals(n) {
     do { x = (Math.random() - .5) * 500; z = (Math.random() - .5) * 500; y = heightAt(x, z); t++; }
     while (y < SEA + 2 && t < 40);
     const g = new THREE.Group();
-    const body = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.9, 0.7),
-      new THREE.MeshStandardMaterial({ color: 0x9a6b3f, roughness: 0.9 }));
-    body.position.y = 0.9; g.add(body);
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5),
-      new THREE.MeshStandardMaterial({ color: 0x8a5b35 }));
-    head.position.set(0.8, 1.2, 0); g.add(head);
+    const hide = new THREE.MeshStandardMaterial({ color: 0x9a6b3f, roughness: 0.9 });
+    const hide2 = new THREE.MeshStandardMaterial({ color: 0x8a5b35, roughness: 0.9 });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.8, 0.7), hide);
+    body.position.y = 1.0; g.add(body);
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), hide2);
+    head.position.set(0.85, 1.25, 0); g.add(head);
+    // 다리 4개
+    const legGeo = new THREE.BoxGeometry(0.18, 0.7, 0.18);
+    [[0.5, 0.25], [0.5, -0.25], [-0.5, 0.25], [-0.5, -0.25]].forEach(([lx, lz]) => {
+      const leg = new THREE.Mesh(legGeo, hide2);
+      leg.position.set(lx, 0.35, lz); g.add(leg);
+    });
+    // 꼬리
+    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.4), hide2);
+    tail.position.set(-0.8, 1.05, 0); g.add(tail);
     g.traverse(o => { if (o.isMesh) o.castShadow = true; });
     g.position.set(x, y, z); scene.add(g);
     animals.push({ mesh: g, x, z, hp: 30, dir: Math.random() * 6.28, retarget: 0, alive: true });
@@ -402,7 +414,7 @@ function updatePlayer(dt) {
   else P.stamina = Math.min(100, P.stamina + dt * 8);
 
   const fwd = new THREE.Vector3(Math.sin(P.yaw), 0, Math.cos(P.yaw));
-  const right = new THREE.Vector3(Math.cos(P.yaw), 0, -Math.sin(P.yaw));
+  const right = new THREE.Vector3(-Math.cos(P.yaw), 0, Math.sin(P.yaw)); // A=왼쪽 / D=오른쪽
   const move = new THREE.Vector3();
   move.addScaledVector(fwd, mz).addScaledVector(right, mx);
   if (move.length() > 0) move.normalize();
@@ -458,6 +470,12 @@ function nearCampfire() {
   return false;
 }
 
+/* 지금 든 게 채광 가능한 도구인지(곡괭이/도끼). 맨손=불가 */
+function canMineHeld() {
+  const w = recipeById(P.hotbar[P.slot]);
+  return !!(w && w.kind === "melee" && w.mine);
+}
+
 /* ---------------- 조준 대상(채집물/동물/플레이어) ---------------- */
 function aimTarget() {
   const w = recipeById(P.hotbar[P.slot]);
@@ -466,7 +484,13 @@ function aimTarget() {
   let best = null, bd = reach;
   for (const r of resources) {
     const d = Math.hypot(P.pos.x - r.x, P.pos.z - r.z);
-    if (d < bd) { bd = d; best = { type: "res", ref: r, label: `<b>F/좌클릭</b> ${({ tree: "🌳 나무", rock: "🪨 돌", bush: "🌿 채집" })[r.type]}` }; }
+    if (d < bd) {
+      bd = d;
+      let label;
+      if (r.type === "rock") label = canMineHeld() ? `<b>F/좌클릭</b> 🪨 돌 캐기` : `🪨 <b>곡괭이 필요</b> (나무로 제작 E)`;
+      else label = `<b>F/좌클릭</b> ${({ tree: "🌳 나무", bush: "🌿 채집" })[r.type]}`;
+      best = { type: "res", ref: r, label };
+    }
   }
   // 물가
   if (!best && heightAt(P.pos.x, P.pos.z) < SEA + 3) {
@@ -482,7 +506,12 @@ function interact() {
   if (t.type === "res") harvest(t.ref);
 }
 
+let mineWarnAt = 0;
 function harvest(r) {
+  if (r.type === "rock" && !canMineHeld()) {
+    if (performance.now() - mineWarnAt > 1500) { toast("맨손으론 돌을 못 캐요! ⛏️ 곡괭이를 만드세요 (E)"); mineWarnAt = performance.now(); }
+    return;
+  }
   r.hp -= 1;
   r.mesh.position.y = r.y + Math.sin(performance.now() / 40) * 0.06; // 흔들림
   if (r.hp > 0) return;
@@ -664,8 +693,12 @@ document.getElementById("craftClose").onclick = toggleCraft;
 
 function canAfford(c) { for (const k in c) if ((P.inv[k] || 0) < c[k]) return false; return true; }
 
+const ICON = { wood: "🪵", stone: "🪨", fiber: "🌿", iron: "🔩", gunpowder: "💥", food: "🍖" };
+const MATS = ["wood", "stone", "fiber", "iron", "gunpowder", "food"];
+
 function renderCraft() {
-  document.getElementById("ageLabel").textContent = `현재 시대: ${AGES[P.age]}`;
+  document.getElementById("ageLabel").textContent = `시대: ${AGES[P.age]}`;
+  renderInv(); renderGear();
   const list = document.getElementById("recipeList"); list.innerHTML = "";
   RECIPES.forEach(r => {
     const locked = r.age > P.age;
@@ -673,13 +706,12 @@ function renderCraft() {
     const div = document.createElement("div");
     div.className = "recipe" + (locked ? " locked" : afford ? "" : " poor");
     const costStr = Object.entries(r.cost).map(([k, v]) => `${ICON[k]}${v}`).join(" ");
-    div.innerHTML = `<div class="ric">${r.icon}</div>
-      <div class="rinfo"><div class="rn">${r.name} <span class="rage">[${AGES[r.age]}]</span></div>
-      <div class="rc">${costStr}</div></div>`;
+    div.title = `${r.name} [${AGES[r.age]}]\n필요: ${costStr}`;
+    div.innerHTML = `<div class="mc-slot"><span class="si">${r.icon}</span>${locked ? '<span class="lock">🔒</span>' : ''}</div>
+      <span class="rn">${r.name}</span><span class="rc">${costStr}</span>`;
     if (!locked) div.onclick = () => craft(r);
     list.appendChild(div);
   });
-  // 다음 시대 진출 버튼
   const adv = document.getElementById("advanceAge");
   if (P.age < AGES.length - 1) {
     const need = ageRequirement(P.age + 1);
@@ -687,9 +719,33 @@ function renderCraft() {
     adv.innerHTML = `⬆️ 다음 시대로 (${AGES[P.age + 1]}) — 필요: ${Object.entries(need).map(([k, v]) => ICON[k] + v).join(" ")}`;
     adv.onclick = () => advanceAge();
   } else adv.classList.add("hidden");
-  renderInvBar();
 }
-const ICON = { wood: "🪵", stone: "🪨", fiber: "🌿", iron: "⛏️", gunpowder: "💥", food: "🍖" };
+
+/* 가방(재료) 슬롯 */
+function renderInv() {
+  const g = document.getElementById("invGrid"); g.innerHTML = "";
+  MATS.forEach(k => {
+    const d = document.createElement("div"); d.className = "mc-slot";
+    const n = P.inv[k] || 0;
+    d.title = k;
+    d.innerHTML = `<span class="si">${ICON[k]}</span>${n ? `<span class="sc">${n}</span>` : ""}`;
+    if (!n) d.classList.add("empty");
+    g.appendChild(d);
+  });
+}
+/* 보유 도구·무기 슬롯 (클릭=장착) */
+function renderGear() {
+  const g = document.getElementById("gearGrid"); g.innerHTML = "";
+  P.hotbar.forEach((id, i) => {
+    const r = recipeById(id);
+    const d = document.createElement("div");
+    d.className = "mc-slot gear" + (i === P.slot ? " active" : "");
+    d.title = r.name + " (장착)";
+    d.innerHTML = `<span class="si">${r.icon}</span><span class="kk">${i + 1}</span>`;
+    d.onclick = () => { selectSlot(i); renderGear(); };
+    g.appendChild(d);
+  });
+}
 
 function ageRequirement(age) {
   return [{}, { wood: 10, stone: 8 }, { iron: 6, wood: 8 }, { iron: 10, stone: 10 }, { iron: 14, gunpowder: 6 }][age] || {};
@@ -723,12 +779,8 @@ function craft(r) {
   }
   P.unlocked[r.id] = true;
   if (r.mag) P.ammo[r.id] = r.mag;
+  P.slot = P.hotbar.indexOf(r.id); // 만든 도구 바로 장착
   toast(`${r.name} 제작 완료!`); rebuildHotbar(); renderCraft();
-}
-
-function renderInvBar() {
-  const el = document.getElementById("invBar");
-  el.innerHTML = Object.entries(P.inv).map(([k, v]) => `<span>${ICON[k]} ${v}</span>`).join("");
 }
 
 /* ---------------- 핫바 ---------------- */
