@@ -94,7 +94,28 @@ const RECIPES = [
 
 /* ---------------- 전역 ---------------- */
 let scene, camera, renderer, clock, sun, hemi, sky, water, envRT;
+let composer, gradePass, fxaaPass, useFX = false;
 let raycaster = new THREE.Raycaster();
+
+/* 시네마틱 컬러 그레이딩 + 비네트 + 필름 그레인 (TLOU 무드) */
+const GradeShader = {
+  uniforms: { tDiffuse: { value: null }, time: { value: 0 } },
+  vertexShader: "varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }",
+  fragmentShader: `
+    varying vec2 vUv; uniform sampler2D tDiffuse; uniform float time;
+    float rand(vec2 c){ return fract(sin(dot(c, vec2(12.9898,78.233)))*43758.5453); }
+    void main(){
+      vec3 col = texture2D(tDiffuse, vUv).rgb;
+      col = (col-0.5)*1.13 + 0.5;                 // 대비
+      float g = dot(col, vec3(0.299,0.587,0.114));
+      col = mix(vec3(g), col, 0.82);              // 채도 살짝 ↓
+      col *= vec3(0.97,1.04,0.95);               // 녹색 무드
+      vec2 d = vUv-0.5; float v = smoothstep(0.95,0.28,length(d));
+      col *= mix(0.62,1.0,v);                     // 비네트
+      col += (rand(vUv*(time+1.0))-0.5)*0.035;    // 필름 그레인
+      gl_FragColor = vec4(col,1.0);
+    }`,
+};
 const glbModels = {};
 let terrainMesh;
 let resources = [];   // 채집물 {mesh,type,hp,x,z}
@@ -239,8 +260,30 @@ function initThree() {
   addEventListener("resize", () => {
     camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
     renderer.setSize(innerWidth, innerHeight);
+    if (composer) composer.setSize(innerWidth, innerHeight);
+    if (fxaaPass) fxaaPass.material.uniforms.resolution.value.set(1 / innerWidth, 1 / innerHeight);
   });
+  setupFX();
   bindInput();
+}
+
+/* 후처리 파이프라인 (데스크톱만 — 모바일은 성능 위해 끔) */
+function setupFX() {
+  useFX = false;
+  if (isMobile || !THREE.EffectComposer || !THREE.UnrealBloomPass || !THREE.ShaderPass) return;
+  try {
+    composer = new THREE.EffectComposer(renderer);
+    composer.addPass(new THREE.RenderPass(scene, camera));
+    composer.addPass(new THREE.UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.55, 0.5, 0.85));
+    gradePass = new THREE.ShaderPass(GradeShader);
+    composer.addPass(gradePass);
+    if (THREE.FXAAShader) {
+      fxaaPass = new THREE.ShaderPass(THREE.FXAAShader);
+      fxaaPass.material.uniforms.resolution.value.set(1 / innerWidth, 1 / innerHeight);
+      composer.addPass(fxaaPass);
+    }
+    useFX = true;
+  } catch (e) { console.warn("[FX] 후처리 비활성화:", e); useFX = false; }
 }
 
 function makeSkyEquirect() {
@@ -290,8 +333,33 @@ function buildWorld() {
   water.rotation.x = -Math.PI / 2; water.position.y = SEA;
   scene.add(water);
 
-  // 채집물 배치
+  // 채집물 + 무성한 풀
   scatterResources();
+  scatterGrass();
+}
+
+/* 우거진 풀 — InstancedMesh 1개로 수천 포기(가벼움) */
+function scatterGrass() {
+  const blade = new THREE.ConeGeometry(0.13, 0.75, 4); blade.translate(0, 0.37, 0);
+  const mat = new THREE.MeshStandardMaterial({ color: 0x4c7a2e, roughness: 1, flatShading: true });
+  const COUNT = 2600;
+  const im = new THREE.InstancedMesh(blade, mat, COUNT);
+  const o = new THREE.Object3D(); const tint = new THREE.Color();
+  let placed = 0;
+  for (let i = 0; i < COUNT * 4 && placed < COUNT; i++) {
+    const x = (Math.random() - .5) * 660, z = (Math.random() - .5) * 660, y = heightAt(x, z);
+    if (y < SEA + 0.8 || y > 30) continue;
+    o.position.set(x, y, z); o.rotation.y = Math.random() * 6.28;
+    const s = 0.7 + Math.random() * 1.1; o.scale.set(s, s + Math.random() * 0.6, s);
+    o.updateMatrix(); im.setMatrixAt(placed, o.matrix);
+    tint.setHSL(0.25 + Math.random() * 0.07, 0.45, 0.28 + Math.random() * 0.1);
+    im.setColorAt(placed, tint);
+    placed++;
+  }
+  im.count = placed; im.instanceMatrix.needsUpdate = true;
+  if (im.instanceColor) im.instanceColor.needsUpdate = true;
+  im.castShadow = false; im.receiveShadow = true;
+  scene.add(im);
 }
 
 function scatterResources() {
@@ -417,7 +485,8 @@ function animate() {
     w: P.hotbar[P.slot], alive: P.alive,
   }, now);
   updateHUD();
-  renderer.render(scene, camera);
+  if (useFX) { gradePass.uniforms.time.value = now * 0.001; composer.render(); }
+  else renderer.render(scene, camera);
 }
 
 /* ---------------- 이동 / 물리 ---------------- */
