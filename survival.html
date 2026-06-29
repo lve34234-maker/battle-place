@@ -114,6 +114,7 @@
   #tReload{right:34px;bottom:206px;width:52px;height:52px;}
   #tBuild{left:30px;bottom:212px;width:54px;height:54px;background:rgba(124,192,67,.2);border-color:var(--green);}
   #tMat{left:98px;bottom:202px;width:50px;height:50px;}
+  #tEat{left:160px;bottom:60px;width:54px;height:54px;background:rgba(242,169,0,.2);border-color:var(--acc);}
 </style>
 </head>
 <body>
@@ -133,8 +134,8 @@
     <button class="btn" id="startBtn">생존 시작</button>
     <div class="keys">
       <b>이동</b> WASD · <b>달리기</b> Shift · <b>점프</b> Space · <b>웅크리기</b> Ctrl<br>
-      <b>채집/사용</b> F · <b>공격/사격</b> 좌클릭 · <b>제작</b> E · <b>재장전</b> R<br>
-      <b>건축모드</b> B (좌클릭 설치 · X 제거 · Q 재료변경)<br>
+      <b>채집/사용/낚시/요리/심기</b> F · <b>공격</b> 좌클릭 · <b>먹기</b> H<br>
+      <b>제작</b> E · <b>재장전</b> R · <b>건축</b> B (설치 좌클릭·제거 X·재료 Q)<br>
       <b>무기교체</b> 1~9 · <b>채팅</b> Enter
     </div>
     <div class="note">🟢 <b>멀티플레이</b>는 <b>net.js</b> 파일에 Supabase 주소·키를 넣으면 자동으로 켜집니다 (안 넣으면 혼자 모드). 서버를 따로 켜둘 필요 없어요.</div>
@@ -195,6 +196,7 @@
   <div class="tb" id="tReload">장전</div>
   <div class="tb" id="tBuild">건축</div>
   <div class="tb" id="tMat">재료</div>
+  <div class="tb" id="tEat">먹기</div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
