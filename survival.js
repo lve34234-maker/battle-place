@@ -105,9 +105,9 @@ let raycaster = new THREE.Raycaster();
    게임에 자동 배치됩니다. as: "tree"(벌목가능)·"rock"(채광가능)·"prop"(장애물)
    ============================================================ */
 const CUSTOM_MODELS = [
-  { file: "birch", as: "tree", count: 60, scale: 1, solidRad: 0.7 },              // 자작나무 숲(벌목 가능)
-  { file: "raft",  as: "prop", count: 7,  scale: 1, solidRad: 1.6, water: true }, // 물가 뗏목
-  { file: "kayak", as: "prop", count: 7,  scale: 1, solidRad: 1.0, water: true }, // 물가 카약
+  { file: "birch", as: "tree", count: 70, size: 9,   solidRad: 0.8 },              // 자작나무 숲(벌목 가능)
+  { file: "raft",  as: "prop", count: 8,  size: 3.5, solidRad: 1.6, water: true }, // 물가 뗏목
+  { file: "kayak", as: "prop", count: 8,  size: 3.2, solidRad: 1.0, water: true }, // 물가 카약
 ];
 
 /* 시네마틱 컬러 그레이딩 + 비네트 + 필름 그레인 (TLOU 무드) */
@@ -429,10 +429,8 @@ function placeCustomModels() {
       tries++;
       const x = (Math.random() - .5) * (MAP * 0.95), z = (Math.random() - .5) * (MAP * 0.95), y = heightAt(x, z);
       if (y < lo || y > hi) continue;
-      const m = glbModels[cm.file].clone(true);
+      const m = groundModel(cm.file, cm.size || (cm.as === "tree" ? 8 : 3.5));
       m.position.set(x, cm.water ? SEA : y, z); m.rotation.y = Math.random() * 6.28;
-      if (cm.scale) m.scale.multiplyScalar(cm.scale);
-      m.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
       scene.add(m);
       if (cm.as === "tree") resources.push({ mesh: m, type: "tree", x, z, y, hp: 4, rad: cm.solidRad || 0.6 });
       else if (cm.as === "rock") resources.push({ mesh: m, type: "rock", x, z, y, hp: 5, rad: cm.solidRad || 1.1 });
@@ -443,10 +441,24 @@ function placeCustomModels() {
 }
 
 /* 우거진 풀 — InstancedMesh 1개로 수천 포기(가벼움) */
+/* .glb 클론을 정규화하고 바닥(밑면)을 0에 맞춰 그룹으로 반환 */
+function groundModel(file, target) {
+  const inner = glbModels[file].clone(true);
+  let box = new THREE.Box3().setFromObject(inner);
+  const size = new THREE.Vector3(); box.getSize(size);
+  const maxd = Math.max(size.x, size.y, size.z) || 1;
+  inner.scale.setScalar(target / maxd);
+  box = new THREE.Box3().setFromObject(inner);
+  const c = new THREE.Vector3(); box.getCenter(c);
+  inner.position.x -= c.x; inner.position.z -= c.z; inner.position.y -= box.min.y;
+  inner.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  const g = new THREE.Group(); g.add(inner); return g;
+}
+
 function scatterGrass() {
   const blade = new THREE.ConeGeometry(0.13, 0.75, 4); blade.translate(0, 0.37, 0);
   const mat = new THREE.MeshStandardMaterial({ color: 0x4c7a2e, roughness: 1, flatShading: true });
-  const COUNT = 5200;
+  const COUNT = 4000;
   const im = new THREE.InstancedMesh(blade, mat, COUNT);
   const o = new THREE.Object3D(); const tint = new THREE.Color();
   let placed = 0;
@@ -483,9 +495,9 @@ function scatterResources() {
       n++;
     }
   };
-  place("tree", 320, makeTree);
-  place("rock", 230, makeRock);
-  place("bush", 230, makeBush);
+  place("tree", 200, makeTree);
+  place("rock", 150, makeRock);
+  place("bush", 160, makeBush);
 }
 
 /* ---- 디테일 있는 채집물 모델 (scatter & 리스폰 공용) ---- */
@@ -541,9 +553,8 @@ function scatterVehicles(n) {
     tries++;
     const x = (Math.random() - .5) * (MAP * 0.85), z = (Math.random() - .5) * (MAP * 0.85), y = heightAt(x, z);
     if (y < SEA + 1.2 || y > 26) continue;
-    const m = glbModels.c4.clone(true);
+    const m = groundModel("c4", 5);
     m.position.set(x, y, z); m.rotation.y = Math.random() * 6.28;
-    m.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
     scene.add(m);
     props.push({ mesh: m, x, z, rad: 2.4 });
     placed++;
@@ -1491,6 +1502,15 @@ function makeToolMesh(r) {
   g.position.set(0.3, -0.32, -0.5); g.rotation.set(0.1, 0, -0.15);
   return g;
 }
+/* 모델 크기를 일정하게 정규화(원본이 커도 손 크기로) + 중심 정렬 */
+function fitModel(m, target) {
+  let box = new THREE.Box3().setFromObject(m);
+  const size = new THREE.Vector3(); box.getSize(size);
+  const maxd = Math.max(size.x, size.y, size.z) || 1;
+  m.scale.setScalar(target / maxd);
+  box = new THREE.Box3().setFromObject(m);
+  const c = new THREE.Vector3(); box.getCenter(c); m.position.sub(c);
+}
 function equipHeld() {
   if (P.heldModel) { camera.remove(P.heldModel); P.heldModel = null; }
   const r = recipeById(P.hotbar[P.slot]);
@@ -1498,14 +1518,15 @@ function equipHeld() {
   if (!r || r.id === "fist") {
     grp.add(makeHand(-0.34)); grp.add(makeHand(0.34)); // 양손 주먹
   } else if (r.model && glbModels[r.model]) {
-    grp.add(makeHand(0.36));                           // 오른손
+    grp.add(makeHand(0.34));                            // 오른손
     const m = glbModels[r.model].clone(true);
-    m.scale.multiplyScalar(0.85); m.position.set(0.18, -0.3, -0.55); m.rotation.y = Math.PI;
-    grp.add(m);
+    fitModel(m, 0.7);                                   // ★ 총 크기 정규화(작게)
+    const holder = new THREE.Group();
+    holder.add(m); holder.position.set(0.26, -0.3, -0.6); holder.rotation.set(0, Math.PI, 0);
+    grp.add(holder);
   } else {
     grp.add(makeHand(0.34)); grp.add(makeToolMesh(r));  // 오른손 + 도구
   }
-  grp.traverse(o => { if (o.isMesh) o.renderOrder = 999; });
   camera.add(grp); P.heldModel = grp;
   if (!scene.children.includes(camera)) scene.add(camera);
 }
@@ -1659,6 +1680,7 @@ function updateHUD() {
   else ammoEl.textContent = "—";
   const t = Math.floor(dayTime * 24);
   document.getElementById("clock").textContent = `🕐 ${("0" + t).slice(-2)}:00`;
+  document.getElementById("killCount").textContent = P.kills;
 }
 function bar(id, v) { const e = document.getElementById(id); if (e) e.style.width = Math.max(0, Math.min(100, v)) + "%"; }
 
